@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "DavidAnson.vscode-markdownlint",
+    "redhat.vscode-yaml",
+    "hediet.vscode-drawio",
+    "Gruntfuggly.todo-tree"
+  ]
+}

@@ -1,0 +1,11 @@
+# General
+.DS_Store
+Thumbs.db
+.env
+.cache/
+.idea/
+**/.history/
+
+# CMake presets build dirs
+build-debug/
+build-release/

@@ -1,0 +1,15 @@
+{
+  "name": "modern-hello",
+  "version": "2.0.0",
+  "description": "A modern hello world module using the Helix module development kit",
+  "author": "Helix Framework Team",
+  "entry_points": {
+    "init": "helix_module_init",
+    "start": "helix_module_start",
+    "stop": "helix_module_stop",
+    "destroy": "helix_module_destroy"
+  },
+  "dependencies": [],
+  "capabilities": [],
+  "minimum_core_version": "1.0.0"
+}
