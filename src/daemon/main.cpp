@@ -1,7 +1,6 @@
 #include "helix/daemon.h"
 #include "helix/version.h"
 #include "ipc_server.h"
-#include "helix/version.h"
 #include <iostream>
 #include <csignal>
 #include <memory>
@@ -121,28 +120,6 @@ int main(int argc, char* argv[]) {
 #endif
 #ifdef HELIX_API_VERSION
                 out += std::string("api=") + std::string(HELIX_API_VERSION) + "\n";
-#endif
-                if (out.empty()) out = "ERR version unavailable\n";
-                return out;
-            }
-            if (cmd == "version") {
-                std::string out;
-#ifdef HELIX_VERSION
-                out += std::string("core=") + HELIX_VERSION + "\n";
-#endif
-#ifdef HELIX_API_VERSION
-                out += std::string("api=") + HELIX_API_VERSION + "\n";
-#endif
-                if (out.empty()) out = "ERR version unavailable\n";
-                return out;
-            }
-            if (cmd == "version") {
-                std::string out;
-#ifdef HELIX_CORE_VERSION
-                out += std::string("core=") + HELIX_CORE_VERSION + "\n";
-#endif
-#ifdef HELIX_API_VERSION
-                out += std::string("api=") + HELIX_API_VERSION + "\n";
 #endif
                 if (out.empty()) out = "ERR version unavailable\n";
                 return out;
