@@ -43,6 +43,10 @@ Artifacts appear under `build-release/` (or `build-debug/` for the debug preset)
 - `helxcompiler` — module compiler producing `.helx`
 - `libhelix-core.a`, `libhelix-daemon.a`
 
+Maintainer note: Versioning is centralized. Set `-DHELIX_VERSION=X.Y.Z` at configure time
+or edit `cmake/Version.cmake`. The value propagates to all targets and a generated header
+`helix/version.h` is available for C++ includes.
+
 ## Quickstart
 
 1. Build as above.
@@ -73,7 +77,8 @@ Modules are shared libraries exporting these C symbols:
 - `helix_module_destroy`
 
 For convenience, `include/helix/module.h` provides helper macros like
-`HELIX_MODULE_DECLARE`, `HELIX_MODULE_INIT`, etc. The examples show both styles.
+`HELIX_MODULE_INIT`, etc. Metadata (name/version/description/author) is read from `manifest.json`,
+so `HELIX_MODULE_DECLARE` is optional.
 
 ## Repository layout
 

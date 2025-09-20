@@ -23,6 +23,13 @@ ModuleLoader::~ModuleLoader() {
 }
 
 bool ModuleLoader::load_module(const std::string& module_path, const std::string& module_name) {
+    // Use default entry point names
+    EntryPoints eps;
+    return load_module(module_path, module_name, eps);
+}
+
+bool ModuleLoader::load_module(const std::string& module_path, const std::string& module_name,
+                               const EntryPoints& entry_points) {
     // Check if module is already loaded
     if (loaded_modules_.find(module_name) != loaded_modules_.end()) {
         std::cerr << "Module '" << module_name << "' is already loaded" << std::endl;
@@ -45,7 +52,7 @@ bool ModuleLoader::load_module(const std::string& module_path, const std::string
     module_info->running = false;
 
     // Resolve entry points
-    if (!resolve_entry_points(handle, module_info->interface)) {
+    if (!resolve_entry_points(handle, module_info->interface, entry_points)) {
         std::cerr << "Failed to resolve entry points for module '" << module_name << "'" << std::endl;
         dlclose(handle);
         return false;
@@ -222,7 +229,7 @@ std::vector<std::string> ModuleLoader::get_loaded_modules() const {
     return module_names;
 }
 
-bool ModuleLoader::resolve_entry_points(void* handle, ModuleInterface& interface) {
+bool ModuleLoader::resolve_entry_points(void* handle, ModuleInterface& interface, const EntryPoints& entry_points) {
     if (!validate_module_handle(handle)) {
         return false;
     }
@@ -232,36 +239,36 @@ bool ModuleLoader::resolve_entry_points(void* handle, ModuleInterface& interface
 
     // Resolve init function (required)
     typedef int (*init_func_t)();
-    init_func_t init_func = reinterpret_cast<init_func_t>(dlsym(handle, "helix_module_init"));
+    init_func_t init_func = reinterpret_cast<init_func_t>(dlsym(handle, entry_points.init.c_str()));
     if (!init_func) {
-        std::cerr << "Required entry point 'helix_module_init' not found: " << dlerror() << std::endl;
+        std::cerr << "Required entry point '" << entry_points.init << "' not found: " << dlerror() << std::endl;
         return false;
     }
     interface.init = init_func;
 
     // Resolve start function (required)
     typedef int (*start_func_t)();
-    start_func_t start_func = reinterpret_cast<start_func_t>(dlsym(handle, "helix_module_start"));
+    start_func_t start_func = reinterpret_cast<start_func_t>(dlsym(handle, entry_points.start.c_str()));
     if (!start_func) {
-        std::cerr << "Required entry point 'helix_module_start' not found: " << dlerror() << std::endl;
+        std::cerr << "Required entry point '" << entry_points.start << "' not found: " << dlerror() << std::endl;
         return false;
     }
     interface.start = start_func;
 
     // Resolve stop function (required)
     typedef int (*stop_func_t)();
-    stop_func_t stop_func = reinterpret_cast<stop_func_t>(dlsym(handle, "helix_module_stop"));
+    stop_func_t stop_func = reinterpret_cast<stop_func_t>(dlsym(handle, entry_points.stop.c_str()));
     if (!stop_func) {
-        std::cerr << "Required entry point 'helix_module_stop' not found: " << dlerror() << std::endl;
+        std::cerr << "Required entry point '" << entry_points.stop << "' not found: " << dlerror() << std::endl;
         return false;
     }
     interface.stop = stop_func;
 
     // Resolve destroy function (required)
     typedef void (*destroy_func_t)();
-    destroy_func_t destroy_func = reinterpret_cast<destroy_func_t>(dlsym(handle, "helix_module_destroy"));
+    destroy_func_t destroy_func = reinterpret_cast<destroy_func_t>(dlsym(handle, entry_points.destroy.c_str()));
     if (!destroy_func) {
-        std::cerr << "Required entry point 'helix_module_destroy' not found: " << dlerror() << std::endl;
+        std::cerr << "Required entry point '" << entry_points.destroy << "' not found: " << dlerror() << std::endl;
         return false;
     }
     interface.destroy = destroy_func;

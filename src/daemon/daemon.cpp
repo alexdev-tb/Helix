@@ -1,4 +1,5 @@
 #include "helix/daemon.h"
+#include "helix/version.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -83,18 +84,18 @@ void HelixDaemon::shutdown() {
 bool HelixDaemon::install_module(const std::string& package_path) {
     if (!initialized_) {
         std::cerr << "Daemon not initialized" << std::endl;
+        set_last_error("Daemon not initialized");
         return false;
     }
 
-    // Support two inputs:
+    // Supported input:
     // 1) A .helx archive (tar.gz) produced by helxcompiler
-    // 2) A directory containing manifest.json and binary
     std::cout << "Installing module from: " << package_path << std::endl;
 
     std::string source_dir = package_path;
     ModuleManifest manifest;
 
-    // If it's a .helx file, extract it to a temp dir to read the manifest
+    // Only accept .helx
     if (std::filesystem::is_regular_file(package_path)) {
         auto ext = std::filesystem::path(package_path).extension().string();
         if (ext == ".helx") {
@@ -114,6 +115,7 @@ bool HelixDaemon::install_module(const std::string& package_path) {
             int rc = std::system(cmd.str().c_str());
             if (rc != 0) {
                 std::cerr << "Failed to extract .helx package: exit code " << rc << std::endl;
+                set_last_error("Extract failed: tar exit code " + std::to_string(rc));
                 std::filesystem::remove_all(temp_dir);
                 return false;
             }
@@ -122,8 +124,39 @@ bool HelixDaemon::install_module(const std::string& package_path) {
             // Parse manifest from extracted temp
             if (!load_module_manifest(source_dir, manifest)) {
                 std::cerr << "Failed to load manifest from extracted package" << std::endl;
+                set_last_error("Manifest parse failed");
                 std::filesystem::remove_all(temp_dir);
                 return false;
+            }
+
+            // Enforce minimum core version requirement before installing
+            if (!manifest.minimum_core_version.empty()) {
+                const std::string core_version = std::string(HELIX_CORE_VERSION);
+                const std::string requirement = std::string(">=") + manifest.minimum_core_version;
+                if (!DependencyResolver::version_satisfies(core_version, requirement)) {
+                    std::cerr << "Install refused: module '" << manifest.name
+                              << "' requires Helix core >= " << manifest.minimum_core_version
+                              << ", but running core is " << core_version << std::endl;
+                    set_last_error("Core version " + std::string(HELIX_CORE_VERSION) +
+                                   " does not satisfy >=" + manifest.minimum_core_version);
+                    std::filesystem::remove_all(source_dir);
+                    return false;
+                }
+            }
+
+            // Enforce minimum API version requirement before installing
+            if (!manifest.minimum_api_version.empty()) {
+                const std::string api_version = std::string(HELIX_API_VERSION);
+                const std::string requirement = std::string(">=") + manifest.minimum_api_version;
+                if (!DependencyResolver::version_satisfies(api_version, requirement)) {
+                    std::cerr << "Install refused: module '" << manifest.name
+                              << "' requires Helix API >= " << manifest.minimum_api_version
+                              << ", but running API is " << api_version << std::endl;
+                    set_last_error("API version " + std::string(HELIX_API_VERSION) +
+                                   " does not satisfy >=" + manifest.minimum_api_version);
+                    std::filesystem::remove_all(source_dir);
+                    return false;
+                }
             }
 
             // Move extracted contents into final module install location (by name)
@@ -132,6 +165,7 @@ bool HelixDaemon::install_module(const std::string& package_path) {
 
             if (module_path.empty()) {
                 std::cerr << "Failed to install extracted package" << std::endl;
+                set_last_error("Install to modules dir failed");
                 return false;
             }
 
@@ -151,39 +185,9 @@ bool HelixDaemon::install_module(const std::string& package_path) {
         }
     }
 
-    // Otherwise treat as a directory package
-    if (!load_module_manifest(source_dir, manifest)) {
-        std::cerr << "Failed to load manifest from package" << std::endl;
-        return false;
-    }
-
-    // Check if module is already installed
-    if (module_registry_.find(manifest.name) != module_registry_.end()) {
-        std::cerr << "Module '" << manifest.name << "' is already installed" << std::endl;
-        return false;
-    }
-
-    // Extract/copy package dir to modules directory
-    std::string module_path = extract_package(source_dir, manifest.name);
-    if (module_path.empty()) {
-        std::cerr << "Failed to extract package" << std::endl;
-        return false;
-    }
-
-    // Create module info
-    DaemonModuleInfo module_info;
-    module_info.name = manifest.name;
-    module_info.version = manifest.version;
-    module_info.install_path = module_path;
-    module_info.manifest = manifest;
-    module_info.state = ModuleState::INSTALLED;
-
-    // Add to registry and dependency resolver
-    module_registry_[manifest.name] = module_info;
-    dependency_resolver_->add_module(manifest);
-
-    std::cout << "Successfully installed module: " << manifest.name << " v" << manifest.version << std::endl;
-    return true;
+    std::cerr << "Install failed: only .helx packages are supported" << std::endl;
+    set_last_error("Unsupported package type (expected .helx)");
+    return false;
 }
 
 bool HelixDaemon::uninstall_module(const std::string& module_name) {
@@ -195,6 +199,7 @@ bool HelixDaemon::uninstall_module(const std::string& module_name) {
     auto it = module_registry_.find(module_name);
     if (it == module_registry_.end()) {
         std::cerr << "Module '" << module_name << "' is not installed" << std::endl;
+        set_last_error("Not installed: " + module_name);
         return false;
     }
 
@@ -207,6 +212,7 @@ bool HelixDaemon::uninstall_module(const std::string& module_name) {
             if (i < dependents.size() - 1) std::cerr << ", ";
         }
         std::cerr << std::endl;
+        set_last_error("Dependents present");
         return false;
     }
 
@@ -214,6 +220,7 @@ bool HelixDaemon::uninstall_module(const std::string& module_name) {
     if (it->second.state != ModuleState::INSTALLED) {
         if (!disable_module(module_name)) {
             std::cerr << "Failed to disable module before uninstallation" << std::endl;
+            set_last_error("Disable before uninstall failed");
             return false;
         }
     }
@@ -221,6 +228,7 @@ bool HelixDaemon::uninstall_module(const std::string& module_name) {
     // Remove module files
     if (!remove_module_files(module_name)) {
         std::cerr << "Failed to remove module files" << std::endl;
+        set_last_error("Filesystem remove failed");
         return false;
     }
 
@@ -241,25 +249,29 @@ bool HelixDaemon::enable_module(const std::string& module_name) {
     auto it = module_registry_.find(module_name);
     if (it == module_registry_.end()) {
         std::cerr << "Module '" << module_name << "' is not installed" << std::endl;
+        set_last_error("Not installed: " + module_name);
         return false;
     }
 
     auto& module_info = it->second;
     if (module_info.state != ModuleState::INSTALLED) {
         std::cerr << "Module '" << module_name << "' is already enabled" << std::endl;
+        set_last_error("Already enabled");
         return false;
     }
 
     // Resolve and load dependencies first
     if (!resolve_and_load_dependencies(module_name)) {
         update_module_state(module_name, ModuleState::ERROR, "Failed to resolve dependencies");
+        set_last_error("Dependency resolution failed");
         return false;
     }
 
     // Load the module
     std::string binary_path = module_info.install_path + "/" + module_info.manifest.binary_path;
-    if (!module_loader_->load_module(binary_path, module_name)) {
+    if (!module_loader_->load_module(binary_path, module_name, module_info.manifest.entry_points)) {
         update_module_state(module_name, ModuleState::ERROR, "Failed to load module binary");
+        set_last_error("Load failed: " + binary_path);
         return false;
     }
 
@@ -268,6 +280,7 @@ bool HelixDaemon::enable_module(const std::string& module_name) {
     // Initialize the module
     if (!module_loader_->initialize_module(module_name)) {
         update_module_state(module_name, ModuleState::ERROR, "Failed to initialize module");
+        set_last_error("Initialize failed");
         return false;
     }
 
@@ -285,6 +298,7 @@ bool HelixDaemon::disable_module(const std::string& module_name) {
     auto it = module_registry_.find(module_name);
     if (it == module_registry_.end()) {
         std::cerr << "Module '" << module_name << "' is not installed" << std::endl;
+        set_last_error("Not installed: " + module_name);
         return false;
     }
 
@@ -304,6 +318,7 @@ bool HelixDaemon::disable_module(const std::string& module_name) {
     // Unload the module
     if (!module_loader_->unload_module(module_name)) {
         update_module_state(module_name, ModuleState::ERROR, "Failed to unload module");
+        set_last_error("Unload failed");
         return false;
     }
 
@@ -321,17 +336,20 @@ bool HelixDaemon::start_module(const std::string& module_name) {
     auto it = module_registry_.find(module_name);
     if (it == module_registry_.end()) {
         std::cerr << "Module '" << module_name << "' is not installed" << std::endl;
+        set_last_error("Not installed: " + module_name);
         return false;
     }
 
     auto& module_info = it->second;
     if (module_info.state != ModuleState::INITIALIZED && module_info.state != ModuleState::STOPPED) {
         std::cerr << "Module '" << module_name << "' must be enabled before starting" << std::endl;
+        set_last_error("Not enabled");
         return false;
     }
 
     if (!module_loader_->start_module(module_name)) {
         update_module_state(module_name, ModuleState::ERROR, "Failed to start module");
+        set_last_error("Start failed");
         return false;
     }
 
@@ -349,17 +367,20 @@ bool HelixDaemon::stop_module(const std::string& module_name) {
     auto it = module_registry_.find(module_name);
     if (it == module_registry_.end()) {
         std::cerr << "Module '" << module_name << "' is not installed" << std::endl;
+        set_last_error("Not installed: " + module_name);
         return false;
     }
 
     auto& module_info = it->second;
     if (module_info.state != ModuleState::RUNNING) {
         std::cerr << "Module '" << module_name << "' is not running" << std::endl;
+        set_last_error("Not running");
         return false;
     }
 
     if (!module_loader_->stop_module(module_name)) {
         update_module_state(module_name, ModuleState::ERROR, "Failed to stop module");
+        set_last_error("Stop failed");
         return false;
     }
 
@@ -426,6 +447,10 @@ bool HelixDaemon::scan_modules_directory() {
     try {
         for (const auto& entry : std::filesystem::directory_iterator(modules_directory_)) {
             if (entry.is_directory()) {
+                // Only consider modules that were installed from .helx (marker file)
+                if (!std::filesystem::exists(entry.path() / ".helx_installed")) {
+                    continue;
+                }
                 ModuleManifest manifest;
                 if (load_module_manifest(entry.path().string(), manifest)) {
                     DaemonModuleInfo module_info;
@@ -471,6 +496,10 @@ std::string HelixDaemon::extract_package(const std::string& package_path, const 
             std::filesystem::copy(package_path, destination, 
                                 std::filesystem::copy_options::recursive);
         }
+        // Write install marker
+        std::ofstream marker(destination + "/.helx_installed");
+        marker << "installed_by=helxcompiler\n";
+        marker.close();
     } catch (const std::exception& e) {
         std::cerr << "Failed to extract package: " << e.what() << std::endl;
         return "";

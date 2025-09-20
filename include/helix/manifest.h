@@ -8,6 +8,16 @@
 namespace helix {
 
 /**
+ * @brief Customizable module entry point symbol names
+ */
+struct EntryPoints {
+    std::string init = "helix_module_init";     ///< Init entry point symbol
+    std::string start = "helix_module_start";   ///< Start entry point symbol
+    std::string stop = "helix_module_stop";     ///< Stop entry point symbol
+    std::string destroy = "helix_module_destroy"; ///< Destroy entry point symbol
+};
+
+/**
  * @brief Represents a module dependency
  */
 struct Dependency {
@@ -29,7 +39,6 @@ struct ModuleManifest {
 
     // Technical details
     std::string binary_path;              ///< Path to the .so file within the package
-    std::string api_version;              ///< Helix API version this module targets
     std::vector<Dependency> dependencies; ///< Required dependencies
     
     // Runtime configuration
@@ -40,6 +49,13 @@ struct ModuleManifest {
     std::string homepage;    ///< Module homepage URL
     std::string repository;  ///< Source repository URL
     std::vector<std::string> tags; ///< Searchable tags
+
+    // Compatibility
+    std::string minimum_core_version; ///< Minimum Helix core version required
+    std::string minimum_api_version;  ///< Minimum Helix API version required
+
+    // Entry points
+    EntryPoints entry_points; ///< Optional custom entry points; defaults provided
 };
 
 /**
@@ -89,6 +105,13 @@ public:
      * @return true if valid name format, false otherwise
      */
     static bool is_valid_module_name(const std::string& name);
+
+    /**
+     * @brief Check if a C symbol name is valid
+     * @param symbol Symbol name
+     * @return true if valid C identifier for dlsym, false otherwise
+     */
+    static bool is_valid_symbol_name(const std::string& symbol);
 
     /**
      * @brief Serialize a manifest back to JSON string

@@ -5,17 +5,29 @@ This directory indexes public APIs and points to headers in `include/helix/`.
 ## Module Development Kit (MDK)
 
 - `include/helix/module.h`
-  - Macros: `HELIX_MODULE_DECLARE`, `HELIX_MODULE_INIT`, `HELIX_MODULE_START`,
-    `HELIX_MODULE_STOP`, `HELIX_MODULE_DESTROY`
-  - Accessors: `helix_module_get_name`, `helix_module_get_version`, etc.
+  - Recommended macros (short aliases): `HELIX_INIT(name)`, `HELIX_START(name)`, `HELIX_STOP(name)`, `HELIX_DISABLE(name)`.
+  - Optional: `HELIX_MODULE_DECLARE` to expose runtime accessors (`helix_module_get_name`, `helix_module_get_version`, ...). Most modules can omit this since metadata comes from `manifest.json`.
   - Context struct: `helix::ModuleContext`
 
-Entry points that modules must export:
+Entry points that modules must export (default symbols):
 
 - `int helix_module_init()`
 - `int helix_module_start()`
 - `int helix_module_stop()`
 - `void helix_module_destroy()`
+
+These symbol names can be customized per-module by declaring an `entry_points` map in the module's `manifest.json`:
+
+```
+"entry_points": {
+  "init": "my_init",
+  "start": "my_start",
+  "stop": "my_stop",
+  "destroy": "my_destroy"
+}
+```
+
+Use the MDK macros `HELIX_MODULE_*_AS(symbol)` to define functions with custom names.
 
 ## Daemon and Core
 

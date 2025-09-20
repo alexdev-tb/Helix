@@ -139,12 +139,20 @@ public:
      */
     static std::string state_to_string(ModuleState state);
 
+    /**
+     * @brief Get last error message from the most recent failed operation
+     */
+    const std::string& last_error() const { return last_error_; }
+
 private:
     std::string modules_directory_;
     std::unique_ptr<ModuleLoader> module_loader_;
     std::unique_ptr<DependencyResolver> dependency_resolver_;
     std::unordered_map<std::string, DaemonModuleInfo> module_registry_;
     bool initialized_;
+    std::string last_error_;
+
+    void set_last_error(const std::string& err) { last_error_ = err; }
 
     /**
      * @brief Scan modules directory and populate registry

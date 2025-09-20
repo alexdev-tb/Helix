@@ -1,41 +1,24 @@
 cmake_minimum_required(VERSION 3.15)
 project(modern_hello)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find required packages
-find_package(Threads REQUIRED)
 
-# Include Helix headers
-include_directories(${CMAKE_SOURCE_DIR}/../../include)
+# Produce a .helx package using the built helxcompiler
+set(MODULES_DIR ${CMAKE_BINARY_DIR}/modules)
+set(HELXCOMPILER_EXE ${CMAKE_BINARY_DIR}/helxcompiler)
 
-# Create the module shared library
-add_library(modern_hello SHARED modern_hello.cpp)
-
-# Link required libraries
-target_link_libraries(modern_hello 
-    PRIVATE 
-    ${CMAKE_DL_LIBS}
-    Threads::Threads
+add_custom_target(modern_hello_helx ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${MODULES_DIR}
+    COMMAND ${HELXCOMPILER_EXE} -v -n modern-hello
+            --ep-init my_init --ep-start my_start --ep-stop my_stop --ep-destroy my_destroy
+            -o ${MODULES_DIR}/modern-hello.helx ${CMAKE_CURRENT_SOURCE_DIR}
+    BYPRODUCTS ${MODULES_DIR}/modern-hello.helx
+    COMMENT "Building modern-hello.helx with helxcompiler"
 )
 
-# Set shared library properties
-set_target_properties(modern_hello PROPERTIES
-    PREFIX ""  # Remove lib prefix
-    SUFFIX ".so"
-    VERSION 2.0.0
-    SOVERSION 2
-)
-
-# Install the module
-install(TARGETS modern_hello
-    LIBRARY DESTINATION lib/helix/modules
-    RUNTIME DESTINATION lib/helix/modules
-)
-
-# Install the manifest
-install(FILES manifest.json 
-    DESTINATION lib/helix/modules
-    RENAME modern_hello.manifest.json
-)
+# Ensure helxcompiler is built before packaging
+if (TARGET helxcompiler)
+    add_dependencies(modern_hello_helx helxcompiler)
+else()
+    message(STATUS "helxcompiler target not found. Ensure BUILD_TOOLS=ON at the top level.")
+endif()

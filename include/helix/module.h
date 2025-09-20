@@ -36,16 +36,11 @@ struct ModuleContext {
  * HELIX_MODULE_DECLARE("my-module", "1.0.0", "A sample module", "Author Name")
  */
 #define HELIX_MODULE_DECLARE(name, version, description, author) \
-    static const char* _helix_module_name = name; \
-    static const char* _helix_module_version = version; \
-    static const char* _helix_module_description = description; \
-    static const char* _helix_module_author = author; \
-    \
     extern "C" { \
-        const char* helix_module_get_name() { return _helix_module_name; } \
-        const char* helix_module_get_version() { return _helix_module_version; } \
-        const char* helix_module_get_description() { return _helix_module_description; } \
-        const char* helix_module_get_author() { return _helix_module_author; } \
+        const char* helix_module_get_name() { return name; } \
+        const char* helix_module_get_version() { return version; } \
+        const char* helix_module_get_description() { return description; } \
+        const char* helix_module_get_author() { return author; } \
     }
 
 /**
@@ -94,6 +89,12 @@ struct ModuleContext {
     extern "C" int helix_module_init()
 
 /**
+ * @brief Define module initialization with a custom symbol name
+ */
+#define HELIX_MODULE_INIT_AS(sym) \
+    extern "C" int sym()
+
+/**
  * @brief Define module start function
  * 
  * Use this macro to define what happens when the module starts.
@@ -107,6 +108,12 @@ struct ModuleContext {
  */
 #define HELIX_MODULE_START() \
     extern "C" int helix_module_start()
+
+/**
+ * @brief Define module start with a custom symbol name
+ */
+#define HELIX_MODULE_START_AS(sym) \
+    extern "C" int sym()
 
 /**
  * @brief Define module stop function
@@ -124,6 +131,12 @@ struct ModuleContext {
     extern "C" int helix_module_stop()
 
 /**
+ * @brief Define module stop with a custom symbol name
+ */
+#define HELIX_MODULE_STOP_AS(sym) \
+    extern "C" int sym()
+
+/**
  * @brief Define module cleanup function
  * 
  * Use this macro to define the module's cleanup logic.
@@ -138,14 +151,43 @@ struct ModuleContext {
     extern "C" void helix_module_destroy()
 
 /**
+ * @brief Define module cleanup with a custom symbol name
+ */
+#define HELIX_MODULE_DESTROY_AS(sym) \
+    extern "C" void sym()
+
+/**
+ * Short, ergonomic aliases for declaring entry points.
+ * These map directly to the *_AS variants above.
+ *
+ * Example:
+ *   HELIX_INIT(my_init) { ... return 0; }
+ *   HELIX_START(my_start) { ... return 0; }
+ *   HELIX_STOP(my_stop) { ... return 0; }
+ *   HELIX_DISABLE(my_destroy) { ... }
+ */
+#define HELIX_INIT(sym)     HELIX_MODULE_INIT_AS(sym)
+#define HELIX_START(sym)    HELIX_MODULE_START_AS(sym)
+#define HELIX_STOP(sym)     HELIX_MODULE_STOP_AS(sym)
+#define HELIX_DISABLE(sym)  HELIX_MODULE_DESTROY_AS(sym)
+#define HELIX_DESTROY(sym)  HELIX_MODULE_DESTROY_AS(sym)
+
+/**
  * @brief Helper macro to get module context
  * 
  * This can be used within module functions to access module metadata.
  */
+#ifndef HELIX_MODULE_NAME
+#define HELIX_MODULE_NAME "module"
+#endif
+#ifndef HELIX_MODULE_VERSION
+#define HELIX_MODULE_VERSION "0.0.0"
+#endif
+
 #define HELIX_MODULE_CONTEXT() \
     helix::ModuleContext { \
-        _helix_module_name, \
-        _helix_module_version, \
+        HELIX_MODULE_NAME, \
+        HELIX_MODULE_VERSION, \
         "", /* install_path will be set by daemon */ \
         nullptr /* user_data */ \
     }
@@ -157,7 +199,7 @@ struct ModuleContext {
  * HELIX_MODULE_LOG("Module is doing something important");
  */
 #define HELIX_MODULE_LOG(message) \
-    std::cout << "[" << _helix_module_name << "] " << message << std::endl
+    std::cout << "[" << HELIX_MODULE_NAME << "] " << message << std::endl
 
 /**
  * @brief Log an error from the module
@@ -166,6 +208,6 @@ struct ModuleContext {
  * HELIX_MODULE_ERROR("Something went wrong!");
  */
 #define HELIX_MODULE_ERROR(message) \
-    std::cerr << "[" << _helix_module_name << "] ERROR: " << message << std::endl
+    std::cerr << "[" << HELIX_MODULE_NAME << "] ERROR: " << message << std::endl
 
 #endif // HELIX_MODULE_H

@@ -31,7 +31,7 @@ bool ManifestParser::parse_from_string(const std::string& json_content, ModuleMa
     
     try {
         // Basic JSON parsing using regex (simplified approach)
-        // Extract string fields
+    // Extract string fields
         std::regex string_field_regex("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"");
         std::sregex_iterator iter(json_content.begin(), json_content.end(), string_field_regex);
         std::sregex_iterator end;
@@ -67,12 +67,13 @@ bool ManifestParser::parse_from_string(const std::string& json_content, ModuleMa
         manifest.description = fields.count("description") ? fields["description"] : "";
         manifest.author = fields.count("author") ? fields["author"] : "";
         manifest.license = fields.count("license") ? fields["license"] : "";
-        manifest.api_version = fields.count("api_version") ? fields["api_version"] : "1.0.0";
+        manifest.minimum_api_version = fields.count("minimum_api_version") ? fields["minimum_api_version"] : "";
         manifest.homepage = fields.count("homepage") ? fields["homepage"] : "";
         manifest.repository = fields.count("repository") ? fields["repository"] : "";
+        manifest.minimum_core_version = fields.count("minimum_core_version") ? fields["minimum_core_version"] : "";
 
         // Parse dependencies array (simplified)
-        std::regex deps_regex("\"dependencies\"\\s*:\\s*\\[(.*?)\\]");
+    std::regex deps_regex("\"dependencies\"\\s*:\\s*\\[([\\s\\S]*?)\\]");
         std::smatch deps_match;
         if (std::regex_search(json_content, deps_match, deps_regex)) {
             if (!parse_dependencies(deps_match[1].str(), manifest.dependencies)) {
@@ -81,7 +82,7 @@ bool ManifestParser::parse_from_string(const std::string& json_content, ModuleMa
         }
 
         // Parse capabilities array
-        std::regex caps_regex("\"capabilities\"\\s*:\\s*\\[(.*?)\\]");
+    std::regex caps_regex("\"capabilities\"\\s*:\\s*\\[([\\s\\S]*?)\\]");
         std::smatch caps_match;
         if (std::regex_search(json_content, caps_match, caps_regex)) {
             if (!parse_string_array(caps_match[1].str(), manifest.capabilities)) {
@@ -90,7 +91,7 @@ bool ManifestParser::parse_from_string(const std::string& json_content, ModuleMa
         }
 
         // Parse tags array
-        std::regex tags_regex("\"tags\"\\s*:\\s*\\[(.*?)\\]");
+    std::regex tags_regex("\"tags\"\\s*:\\s*\\[([\\s\\S]*?)\\]");
         std::smatch tags_match;
         if (std::regex_search(json_content, tags_match, tags_regex)) {
             if (!parse_string_array(tags_match[1].str(), manifest.tags)) {
@@ -99,11 +100,29 @@ bool ManifestParser::parse_from_string(const std::string& json_content, ModuleMa
         }
 
         // Parse config object (simplified)
-        std::regex config_regex("\"config\"\\s*:\\s*\\{(.*?)\\}");
+    std::regex config_regex("\"config\"\\s*:\\s*\\{([\\s\\S]*?)\\}");
         std::smatch config_match;
         if (std::regex_search(json_content, config_match, config_regex)) {
             if (!parse_config(config_match[1].str(), manifest.config)) {
                 return false;
+            }
+        }
+
+        // Parse entry_points object (optional)
+    std::regex ep_obj_regex("\"entry_points\"\\s*:\\s*\\{([\\s\\S]*?)\\}");
+        std::smatch ep_obj_match;
+        if (std::regex_search(json_content, ep_obj_match, ep_obj_regex)) {
+            const std::string ep_json = ep_obj_match[1].str();
+            std::regex ep_field_regex("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"");
+            std::sregex_iterator eiter(ep_json.begin(), ep_json.end(), ep_field_regex);
+            std::sregex_iterator eend;
+            for (; eiter != eend; ++eiter) {
+                const std::string key = (*eiter)[1].str();
+                const std::string val = (*eiter)[2].str();
+                if (key == "init") manifest.entry_points.init = val;
+                else if (key == "start") manifest.entry_points.start = val;
+                else if (key == "stop") manifest.entry_points.stop = val;
+                else if (key == "destroy") manifest.entry_points.destroy = val;
             }
         }
 
@@ -128,9 +147,15 @@ bool ManifestParser::validate_manifest(const ModuleManifest& manifest) {
         return false;
     }
 
-    // Validate API version
-    if (!manifest.api_version.empty() && !is_valid_version(manifest.api_version)) {
-        set_error("Invalid API version format: " + manifest.api_version);
+    // Validate minimum core version (if provided)
+    if (!manifest.minimum_core_version.empty() && !is_valid_version(manifest.minimum_core_version)) {
+        set_error("Invalid minimum_core_version format: " + manifest.minimum_core_version);
+        return false;
+    }
+
+    // Validate minimum API version (if provided)
+    if (!manifest.minimum_api_version.empty() && !is_valid_version(manifest.minimum_api_version)) {
+        set_error("Invalid minimum_api_version format: " + manifest.minimum_api_version);
         return false;
     }
 
@@ -152,6 +177,24 @@ bool ManifestParser::validate_manifest(const ModuleManifest& manifest) {
         }
     }
 
+    // Validate entry point symbol names (must be valid identifiers)
+    if (!manifest.entry_points.init.empty() && !is_valid_symbol_name(manifest.entry_points.init)) {
+        set_error("Invalid entry point symbol for init: " + manifest.entry_points.init);
+        return false;
+    }
+    if (!manifest.entry_points.start.empty() && !is_valid_symbol_name(manifest.entry_points.start)) {
+        set_error("Invalid entry point symbol for start: " + manifest.entry_points.start);
+        return false;
+    }
+    if (!manifest.entry_points.stop.empty() && !is_valid_symbol_name(manifest.entry_points.stop)) {
+        set_error("Invalid entry point symbol for stop: " + manifest.entry_points.stop);
+        return false;
+    }
+    if (!manifest.entry_points.destroy.empty() && !is_valid_symbol_name(manifest.entry_points.destroy)) {
+        set_error("Invalid entry point symbol for destroy: " + manifest.entry_points.destroy);
+        return false;
+    }
+
     return true;
 }
 
@@ -171,6 +214,13 @@ bool ManifestParser::is_valid_module_name(const std::string& name) {
     return std::regex_match(name, name_regex);
 }
 
+bool ManifestParser::is_valid_symbol_name(const std::string& symbol) {
+    // C identifier: starts with letter or underscore, then letters/digits/underscore, allow namespace-like '::' not allowed for dlsym, so restrict to C-style
+    if (symbol.empty() || symbol.size() > 128) return false;
+    std::regex sym_regex("^[A-Za-z_][A-Za-z0-9_]*$");
+    return std::regex_match(symbol, sym_regex);
+}
+
 std::string ManifestParser::serialize_manifest(const ModuleManifest& manifest) {
     std::stringstream json;
     json << "{\n";
@@ -180,7 +230,13 @@ std::string ManifestParser::serialize_manifest(const ModuleManifest& manifest) {
     json << "  \"author\": \"" << manifest.author << "\",\n";
     json << "  \"license\": \"" << manifest.license << "\",\n";
     json << "  \"binary_path\": \"" << manifest.binary_path << "\",\n";
-    json << "  \"api_version\": \"" << manifest.api_version << "\",\n";
+    // Entry points
+    json << "  \"entry_points\": {\n";
+    json << "    \"init\": \"" << manifest.entry_points.init << "\",\n";
+    json << "    \"start\": \"" << manifest.entry_points.start << "\",\n";
+    json << "    \"stop\": \"" << manifest.entry_points.stop << "\",\n";
+    json << "    \"destroy\": \"" << manifest.entry_points.destroy << "\"\n";
+    json << "  },\n";
     
     // Dependencies
     json << "  \"dependencies\": [\n";
@@ -222,6 +278,13 @@ std::string ManifestParser::serialize_manifest(const ModuleManifest& manifest) {
     }
     json << "  },\n";
     
+    if (!manifest.minimum_core_version.empty()) {
+        json << "  \"minimum_core_version\": \"" << manifest.minimum_core_version << "\",\n";
+    }
+    if (!manifest.minimum_api_version.empty()) {
+        json << "  \"minimum_api_version\": \"" << manifest.minimum_api_version << "\",\n";
+    }
+
     json << "  \"homepage\": \"" << manifest.homepage << "\",\n";
     json << "  \"repository\": \"" << manifest.repository << "\"\n";
     json << "}";

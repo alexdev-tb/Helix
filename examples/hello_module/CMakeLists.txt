@@ -1,24 +1,19 @@
-# Build the hello module as a shared library
-add_library(hello-module SHARED hello_module.cpp)
+cmake_minimum_required(VERSION 3.15)
+project(hello_module)
 
-# Set output directory to match manifest binary_path
-set_target_properties(hello-module PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    OUTPUT_NAME "hello-module"
+# Produce a .helx package using the built helxcompiler
+set(MODULES_DIR ${CMAKE_BINARY_DIR}/modules)
+set(HELXCOMPILER_EXE ${CMAKE_BINARY_DIR}/helxcompiler)
+
+add_custom_target(hello_module_helx ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${MODULES_DIR}
+    COMMAND ${HELXCOMPILER_EXE} -v -n hello-module -o ${MODULES_DIR}/hello-module.helx ${CMAKE_CURRENT_SOURCE_DIR}
+    BYPRODUCTS ${MODULES_DIR}/hello-module.helx
+    COMMENT "Building hello-module.helx with helxcompiler"
 )
 
-# Copy manifest to build directory
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/manifest.json
-    ${CMAKE_CURRENT_BINARY_DIR}/manifest.json
-    COPYONLY
-)
-
-# Create module package directory for easy testing
-set(MODULE_PACKAGE_DIR ${CMAKE_BINARY_DIR}/modules/hello-module)
-add_custom_command(TARGET hello-module POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${MODULE_PACKAGE_DIR}
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:hello-module> ${MODULE_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/manifest.json ${MODULE_PACKAGE_DIR}/
-    COMMENT "Creating hello-module package"
-)
+if (TARGET helxcompiler)
+    add_dependencies(hello_module_helx helxcompiler)
+else()
+    message(STATUS "helxcompiler target not found. Ensure BUILD_TOOLS=ON at the top level.")
+endif()
