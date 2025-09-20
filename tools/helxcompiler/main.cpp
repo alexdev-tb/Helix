@@ -9,6 +9,7 @@ void print_usage(const char* program_name) {
     std::cout << "Options:\n";
     std::cout << "  -o, --output <file>     Output .helx file (default: <module_name>.helx)\n";
     std::cout << "  -n, --name <name>       Module name (auto-detected if not specified)\n";
+    std::cout << "  -V, --version <ver>     Module version (auto-detected if not specified)\n";
     std::cout << "  -I, --include <path>    Add include directory\n";
     std::cout << "  -L, --library-path <path> Add library search path\n";
     std::cout << "  -l, --library <lib>     Link against library\n";
@@ -16,6 +17,11 @@ void print_usage(const char* program_name) {
     std::cout << "  -O, --optimize <level>  Optimization level (default: -O2)\n";
     std::cout << "  -g, --debug             Include debug information\n";
     std::cout << "  -v, --verbose           Verbose output\n";
+    std::cout << "  --ep-init <symbol>      Custom init entry point symbol\n";
+    std::cout << "  --ep-start <symbol>     Custom start entry point symbol\n";
+    std::cout << "  --ep-stop <symbol>      Custom stop entry point symbol\n";
+    std::cout << "  --ep-destroy <symbol>   Custom destroy entry point symbol\n";
+    std::cout << "  --validate              Validate manifest.json only (no build)\n";
     std::cout << "  -h, --help              Show this help message\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << program_name << " my_module_src/\n";
@@ -34,6 +40,7 @@ int main(int argc, char* argv[]) {
     config.optimization_level = "-O2";
     config.debug_info = false;
     config.verbose = false;
+    bool validate_only = false;
 
     std::string source_directory;
 
@@ -58,6 +65,13 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             config.module_name = argv[i];
+        }
+        else if (arg == "-V" || arg == "--version") {
+            if (++i >= argc) {
+                std::cerr << "Error: " << arg << " requires an argument" << std::endl;
+                return 1;
+            }
+            config.module_version = argv[i];
         }
         else if (arg == "-I" || arg == "--include") {
             if (++i >= argc) {
@@ -100,6 +114,25 @@ int main(int argc, char* argv[]) {
         else if (arg == "-v" || arg == "--verbose") {
             config.verbose = true;
         }
+        else if (arg == "--ep-init") {
+            if (++i >= argc) { std::cerr << "Error: --ep-init requires a symbol" << std::endl; return 1; }
+            config.ep_init = argv[i];
+        }
+        else if (arg == "--ep-start") {
+            if (++i >= argc) { std::cerr << "Error: --ep-start requires a symbol" << std::endl; return 1; }
+            config.ep_start = argv[i];
+        }
+        else if (arg == "--ep-stop") {
+            if (++i >= argc) { std::cerr << "Error: --ep-stop requires a symbol" << std::endl; return 1; }
+            config.ep_stop = argv[i];
+        }
+        else if (arg == "--ep-destroy") {
+            if (++i >= argc) { std::cerr << "Error: --ep-destroy requires a symbol" << std::endl; return 1; }
+            config.ep_destroy = argv[i];
+        }
+        else if (arg == "--validate") {
+            validate_only = true;
+        }
         else if (arg[0] == '-') {
             std::cerr << "Error: Unknown option " << arg << std::endl;
             return 1;
@@ -123,16 +156,34 @@ int main(int argc, char* argv[]) {
     // Create compiler instance
     helix::HelixCompiler compiler;
 
-    // Auto-detect module configuration if needed
-    if (config.module_name.empty() || config.output_file.empty()) {
-        if (!compiler.detect_module_config(source_directory, config)) {
+    // Auto-detect module configuration if needed (also when version is missing)
+    bool had_cli_name = !config.module_name.empty();
+    bool had_cli_version = !config.module_version.empty();
+    if (config.module_name.empty() || config.output_file.empty() || config.module_version.empty()) {
+        helix::CompileConfig detected = config; // copy existing (include paths, etc.)
+        if (!compiler.detect_module_config(source_directory, detected)) {
             std::cerr << "Error: " << compiler.get_last_error() << std::endl;
             return 1;
         }
+        // Preserve CLI overrides if provided
+        if (!had_cli_name) config.module_name = detected.module_name; // only set if not provided by CLI
+        if (!had_cli_version) config.module_version = detected.module_version; // only set if not provided by CLI
+        // If output still empty, take detected default
+        if (config.output_file.empty()) config.output_file = detected.output_file;
     }
 
     // Set source directory
     config.source_directory = source_directory;
+
+    if (validate_only) {
+        if (compiler.validate_manifest_in_dir(config)) {
+            std::cout << "Manifest validation: OK" << std::endl;
+            return 0;
+        } else {
+            std::cerr << "Manifest validation failed: " << compiler.get_last_error() << std::endl;
+            return 2;
+        }
+    }
 
     // Set default output file if still empty
     if (config.output_file.empty()) {
@@ -140,8 +191,10 @@ int main(int argc, char* argv[]) {
     }
 
     if (config.verbose) {
-        std::cout << "Helix Module Compiler" << std::endl;
+        const char* BOLD = "\033[1m"; const char* RESET = "\033[0m";
+        std::cout << BOLD << "Helix Module Compiler" << RESET << std::endl;
         std::cout << "Module name: " << config.module_name << std::endl;
+        std::cout << "Module version: " << (config.module_version.empty() ? "(auto)" : config.module_version) << std::endl;
         std::cout << "Source directory: " << config.source_directory << std::endl;
         std::cout << "Output file: " << config.output_file << std::endl;
         std::cout << "C++ standard: " << config.cxx_standard << std::endl;

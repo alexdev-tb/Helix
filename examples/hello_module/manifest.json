@@ -5,10 +5,9 @@
   "author": "Helix Framework",
   "license": "MIT",
   "binary_path": "libhello-module.so",
-  "api_version": "1.0.0",
+  "minimum_api_version": "1.0.0",
   "dependencies": [],
   "capabilities": [],
-  "tags": ["example", "hello-world"],
   "config": {},
   "homepage": "",
   "repository": ""

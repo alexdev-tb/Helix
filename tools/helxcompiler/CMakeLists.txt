@@ -7,12 +7,13 @@ add_executable(helxcompiler
 # Include directories
 target_include_directories(helxcompiler PRIVATE
     ${CMAKE_SOURCE_DIR}/include
+    ${HELIX_GENERATED_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Link libraries (we'll need libarchive for .helx packaging)
 # For now, we'll use system tar command as a fallback
-target_link_libraries(helxcompiler ${CMAKE_DL_LIBS})
+target_link_libraries(helxcompiler helix-core ${CMAKE_DL_LIBS} Threads::Threads)
 
 # Set output directory
 set_target_properties(helxcompiler PROPERTIES

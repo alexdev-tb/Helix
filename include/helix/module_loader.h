@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <memory>
 #include <functional>
+#include "helix/manifest.h"
 
 namespace helix {
 
@@ -49,6 +50,16 @@ public:
      * @return true if loaded successfully, false otherwise
      */
     bool load_module(const std::string& module_path, const std::string& module_name);
+
+    /**
+     * @brief Load a module with custom entry point symbol names
+     * @param module_path Path to the .so file
+     * @param module_name Unique name for the module
+     * @param entry_points Custom entry point symbols (init/start/stop/destroy)
+     * @return true on success
+     */
+    bool load_module(const std::string& module_path, const std::string& module_name,
+                     const EntryPoints& entry_points);
 
     /**
      * @brief Unload a previously loaded module
@@ -114,7 +125,7 @@ private:
      * @param interface ModuleInterface to populate
      * @return true if all entry points found, false otherwise
      */
-    bool resolve_entry_points(void* handle, ModuleInterface& interface);
+    bool resolve_entry_points(void* handle, ModuleInterface& interface, const EntryPoints& entry_points);
 
     /**
      * @brief Validate that a module handle is valid

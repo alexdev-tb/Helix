@@ -1,0 +1,53 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Helix after docs and helixctl changes",
+			"type": "shell",
+			"command": "cmake --build build-release -j",
+			"group": "build"
+		},
+		{
+			"label": "Build Helix with minimum_api_version support",
+			"type": "shell",
+			"command": "cmake --build build-release -j",
+			"group": "build"
+		},
+		{
+			"label": "Rebuild after API field removal",
+			"type": "shell",
+			"command": "cmake --build build-release -j",
+			"group": "build"
+		},
+		{
+			"label": "Retry build after removing api_version references",
+			"type": "shell",
+			"command": "cmake --build build-release -j",
+			"group": "build"
+		},
+		{
+			"label": "Final rebuild after manifest cleanup",
+			"type": "shell",
+			"command": "cmake --build build-release -j",
+			"group": "build"
+		},
+		{
+			"label": "Build after version IPC change",
+			"type": "shell",
+			"command": "cmake --build build-release -j",
+			"group": "build"
+		},
+		{
+			"label": "Build after adding version IPC and socket defaults",
+			"type": "shell",
+			"command": "cmake --build build-release -j",
+			"group": "build"
+		},
+		{
+			"label": "Build after helixctl changes (version, socket default, enable service)",
+			"type": "shell",
+			"command": "cmake --build build-release -j",
+			"group": "build"
+		}
+	]
+}

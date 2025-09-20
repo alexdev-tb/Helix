@@ -22,6 +22,11 @@ struct CompileConfig {
     std::string optimization_level;  ///< Optimization level (default: -O2)
     bool debug_info;                ///< Include debug information
     bool verbose;                   ///< Verbose output
+    // Optional custom entry point symbols
+    std::string ep_init;            ///< Symbol for init (default helix_module_init)
+    std::string ep_start;           ///< Symbol for start
+    std::string ep_stop;            ///< Symbol for stop
+    std::string ep_destroy;         ///< Symbol for destroy
 };
 
 /**
@@ -46,6 +51,11 @@ public:
      * @return true if detection succeeded, false otherwise
      */
     bool detect_module_config(const std::string& source_dir, CompileConfig& config);
+
+    /**
+     * @brief Validate manifest.json in a source directory (no build)
+     */
+    bool validate_manifest_in_dir(const CompileConfig& config);
 
     /**
      * @brief Get the last error message
