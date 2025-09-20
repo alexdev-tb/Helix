@@ -85,7 +85,6 @@ bool HelixCompiler::detect_module_config(const std::string& source_dir, CompileC
     std::string module_name, module_version;
     if (!extract_module_metadata(source_files, module_name, module_version)) {
         // Fallback to manifest.json if present (lenient parse)
-            // Fallback to manifest.json if present (lenient parse)
         std::filesystem::path manifest_path = std::filesystem::path(source_dir) / "manifest.json";
         if (std::filesystem::exists(manifest_path)) {
             std::ifstream mf(manifest_path);
