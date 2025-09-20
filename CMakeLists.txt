@@ -51,6 +51,11 @@ add_executable(helixd src/daemon/main.cpp)
 target_link_libraries(helixd helix-daemon helix-core)
 target_compile_definitions(helixd PUBLIC HELIX_CORE_VERSION="${PROJECT_VERSION}")
 target_include_directories(helixd PUBLIC ${HELIX_GENERATED_INCLUDE_DIR})
+target_sources(helixd PRIVATE src/daemon/log_registry.cpp)
+if (UNIX)
+    # Export symbols from the main executable so modules can dlsym(RTLD_DEFAULT)
+    target_link_options(helixd PRIVATE -Wl,--export-dynamic)
+endif()
 
 # Installation
 install(TARGETS helixd DESTINATION bin)
@@ -66,8 +71,9 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 
-# Example module for testing (optional)
+# Example and default modules (optional)
 option(BUILD_EXAMPLE_MODULE "Build example modules for testing" ON)
+option(BUILD_DEEFAULT_MODULE "Build default modules" ON)
 option(BUILD_TOOLS "Build helxcompiler and other tools" ON)
 
 # Build tools first so helxcompiler target exists for examples
@@ -76,7 +82,13 @@ if(BUILD_TOOLS)
 endif()
 
 if(BUILD_EXAMPLE_MODULE)
-    add_subdirectory(examples)
+    # Examples moved under modules/
+    add_subdirectory(modules/examples)
+endif()
+
+if(BUILD_DEEFAULT_MODULE)
+    # Default modules under modules/
+    add_subdirectory(modules/default)
 endif()
 
 # Simple control client

@@ -5,9 +5,13 @@
 #include <iostream>
 #include <sstream>
 #include <chrono>
+#include <regex>
+#include <algorithm>
+#include <set>
 #ifdef __unix__
 #include <unistd.h>
 #endif
+
 
 namespace helix {
 
@@ -47,6 +51,24 @@ bool HelixDaemon::initialize(const std::string& modules_directory) {
     }
 
     initialized_ = true;
+
+    // Attempt to restore previously saved module states (best-effort)
+    try {
+        std::unordered_map<std::string, ModuleState> saved;
+        if (load_saved_module_states(saved)) {
+            if (!saved.empty()) {
+                std::cout << "Loaded saved module states from '" << state_file_path() << "' (" << saved.size() << ")" << std::endl;
+            } else {
+                std::cout << "No saved module state to restore (" << state_file_path() << ")" << std::endl;
+            }
+            restore_saved_states(saved);
+        } else {
+            std::cerr << "Failed to load saved module states from '" << state_file_path() << "'" << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "State restore failed: " << e.what() << std::endl;
+    }
+
     std::cout << "Helix daemon initialized with modules directory: " << modules_directory_ << std::endl;
     return true;
 }
@@ -57,6 +79,13 @@ void HelixDaemon::shutdown() {
     }
 
     std::cout << "Shutting down Helix daemon..." << std::endl;
+
+    // Save current module states for restoration on next start (best-effort)
+    try {
+        (void)save_module_states();
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to save module states: " << e.what() << std::endl;
+    }
 
     // Stop all running modules
     for (auto& [name, info] : module_registry_) {
@@ -262,15 +291,17 @@ bool HelixDaemon::enable_module(const std::string& module_name) {
 
     // Resolve and load dependencies first
     if (!resolve_and_load_dependencies(module_name)) {
-        update_module_state(module_name, ModuleState::ERROR, "Failed to resolve dependencies");
+        // Do not transition to ERROR on dependency issues; leave as INSTALLED so the user can retry
         set_last_error("Dependency resolution failed");
+        std::cerr << "Enable aborted for '" << module_name << "': dependencies not satisfied" << std::endl;
         return false;
     }
 
     // Load the module
     std::string binary_path = module_info.install_path + "/" + module_info.manifest.binary_path;
     if (!module_loader_->load_module(binary_path, module_name, module_info.manifest.entry_points)) {
-        update_module_state(module_name, ModuleState::ERROR, "Failed to load module binary");
+        // Leave module in INSTALLED state to allow retry/uninstall
+        update_module_state(module_name, ModuleState::INSTALLED, "Failed to load module binary");
         set_last_error("Load failed: " + binary_path);
         return false;
     }
@@ -279,7 +310,9 @@ bool HelixDaemon::enable_module(const std::string& module_name) {
 
     // Initialize the module
     if (!module_loader_->initialize_module(module_name)) {
-        update_module_state(module_name, ModuleState::ERROR, "Failed to initialize module");
+        // Best-effort unload and reset state
+        (void)module_loader_->unload_module(module_name);
+        update_module_state(module_name, ModuleState::INSTALLED, "Failed to initialize module");
         set_last_error("Initialize failed");
         return false;
     }
@@ -315,11 +348,13 @@ bool HelixDaemon::disable_module(const std::string& module_name) {
         }
     }
 
-    // Unload the module
-    if (!module_loader_->unload_module(module_name)) {
-        update_module_state(module_name, ModuleState::ERROR, "Failed to unload module");
-        set_last_error("Unload failed");
-        return false;
+    // Unload the module if it was actually loaded; otherwise just reset state
+    if (module_info.state == ModuleState::LOADED || module_info.state == ModuleState::INITIALIZED || module_info.state == ModuleState::RUNNING || module_info.state == ModuleState::STOPPED) {
+        if (!module_loader_->unload_module(module_name)) {
+            update_module_state(module_name, ModuleState::ERROR, "Failed to unload module");
+            set_last_error("Unload failed");
+            return false;
+        }
     }
 
     update_module_state(module_name, ModuleState::INSTALLED);
@@ -348,7 +383,8 @@ bool HelixDaemon::start_module(const std::string& module_name) {
     }
 
     if (!module_loader_->start_module(module_name)) {
-        update_module_state(module_name, ModuleState::ERROR, "Failed to start module");
+        // Do not leave in ERROR; remain INITIALIZED to allow retry or stop/disable
+        update_module_state(module_name, ModuleState::INITIALIZED, "Failed to start module");
         set_last_error("Start failed");
         return false;
     }
@@ -492,9 +528,24 @@ std::string HelixDaemon::extract_package(const std::string& package_path, const 
     std::string destination = modules_directory_ + "/" + module_name;
     
     try {
+        // If destination exists (reinstall/upgrade), verify it belongs to the same module
+        std::error_code dec;
+        if (std::filesystem::exists(destination, dec)) {
+            // Try to read existing manifest to confirm identity
+            ModuleManifest existing;
+            bool ok = false;
+            try { ok = load_module_manifest(destination, existing); } catch (...) { ok = false; }
+            if (ok && !existing.name.empty() && existing.name != module_name) {
+                std::cerr << "Refusing to overwrite existing module directory '" << destination
+                          << "' which belongs to '" << existing.name << "'" << std::endl;
+                return std::string();
+            }
+            // Safe to remove: same module or unreadable; proceed
+            std::filesystem::remove_all(destination, dec);
+        }
         if (package_path != destination) {
-            std::filesystem::copy(package_path, destination, 
-                                std::filesystem::copy_options::recursive);
+            std::filesystem::copy(package_path, destination,
+                                  std::filesystem::copy_options::recursive);
         }
         // Write install marker
         std::ofstream marker(destination + "/.helx_installed");
@@ -582,6 +633,198 @@ std::string HelixDaemon::state_to_string(ModuleState state) {
         case ModuleState::STOPPED: return "Stopped";
         case ModuleState::ERROR: return "Error";
         default: return "Invalid";
+    }
+}
+
+ModuleState HelixDaemon::state_from_string(const std::string& state_str) {
+    if (state_str == "Unknown") return ModuleState::UNKNOWN;
+    if (state_str == "Installed") return ModuleState::INSTALLED;
+    if (state_str == "Loaded") return ModuleState::LOADED;
+    if (state_str == "Initialized") return ModuleState::INITIALIZED;
+    if (state_str == "Running") return ModuleState::RUNNING;
+    if (state_str == "Stopped") return ModuleState::STOPPED;
+    if (state_str == "Error") return ModuleState::ERROR;
+    return ModuleState::UNKNOWN;
+}
+
+std::string HelixDaemon::state_file_path() const {
+    return modules_directory_ + "/.helix_state.json";
+}
+
+bool HelixDaemon::save_module_states() const {
+    // We persist only high-level states we can restore: Installed, Initialized, Running, Stopped
+    // Error/Loaded will be treated conservatively.
+    const std::string path = state_file_path();
+    std::ofstream ofs(path, std::ios::trunc);
+    if (!ofs.is_open()) {
+        std::cerr << "Could not open state file for writing: " << path << std::endl;
+        return false;
+    }
+
+    ofs << "{\n  \"modules\": {\n";
+    size_t count = 0;
+    const size_t total = module_registry_.size();
+    for (const auto& kv : module_registry_) {
+        const auto& name = kv.first;
+        const auto& info = kv.second;
+        ofs << "    \"" << name << "\": { \"state\": \"" << state_to_string(info.state) << "\" }";
+        if (++count < total) ofs << ",";
+        ofs << "\n";
+    }
+    ofs << "  }\n}";
+    ofs.close();
+    std::cout << "Saved module states to '" << path << "'" << std::endl;
+    return true;
+}
+
+bool HelixDaemon::load_saved_module_states(std::unordered_map<std::string, ModuleState>& out_states) const {
+    out_states.clear();
+    const std::string path = state_file_path();
+    std::ifstream ifs(path);
+    if (!ifs.is_open()) {
+        // No state saved yet is not an error
+        return true;
+    }
+    std::stringstream buf; buf << ifs.rdbuf();
+    const std::string content = buf.str();
+    ifs.close();
+
+    // Extremely small and tolerant parser.
+    // We specifically scope to the top-level object at key "modules" and parse entries of the form:
+    //   "name": { "state": "Value" }
+    // This avoids bringing in a JSON dependency while ensuring we don't accidentally treat
+    // the top-level key "modules" itself as a module entry.
+    try {
+        // Locate the "modules" object block
+        const std::string modules_key = "\"modules\"";
+        size_t key_pos = content.find(modules_key);
+        if (key_pos == std::string::npos) {
+            // Be tolerant: treat as having nothing to restore
+            std::cerr << "State file '" << path << "' has no 'modules' key" << std::endl;
+            return true;
+        }
+
+        // Find the opening brace for the modules object after the key
+        size_t brace_start = content.find('{', key_pos + modules_key.size());
+        if (brace_start == std::string::npos) {
+            std::cerr << "State file '" << path << "': malformed 'modules' object" << std::endl;
+            return true;
+        }
+
+        // Find the matching closing brace by tracking nesting
+        size_t i = brace_start;
+        int depth = 0;
+        bool in_string = false;
+        for (; i < content.size(); ++i) {
+            char c = content[i];
+            if (c == '"') {
+                // Toggle in_string if not escaped
+                bool escaped = (i > 0 && content[i-1] == '\\');
+                if (!escaped) in_string = !in_string;
+            }
+            if (in_string) continue;
+            if (c == '{') {
+                ++depth;
+            } else if (c == '}') {
+                --depth;
+                if (depth == 0) {
+                    break; // 'i' is the matching closing brace
+                }
+            }
+        }
+
+        if (i >= content.size()) {
+            std::cerr << "State file '" << path << "': unterminated 'modules' object" << std::endl;
+            return true;
+        }
+
+        const size_t brace_end = i; // inclusive index of '}'
+        const std::string modules_block = content.substr(brace_start + 1, brace_end - brace_start - 1);
+
+        // Now parse immediate entries within the modules block
+        // Raw string for clarity; ECMAScript regex used by std::regex requires \} to match a literal '}'
+        std::regex entry_regex(R"regex("([^"]+)"\s*:\s*\{[^}]*"state"\s*:\s*"([^"]+)"[^}]*\})regex");
+        std::sregex_iterator it(modules_block.begin(), modules_block.end(), entry_regex);
+        std::sregex_iterator end;
+        size_t parsed = 0;
+        for (; it != end; ++it) {
+            const std::string name = (*it)[1].str();
+            const std::string state_s = (*it)[2].str();
+            if (name == "modules") {
+                // Defensive: skip any accidental capture of the container key
+                continue;
+            }
+            out_states[name] = state_from_string(state_s);
+            ++parsed;
+        }
+        if (parsed == 0) {
+            std::cerr << "State file '" << path << "' contained no module entries" << std::endl;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to parse state file: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+void HelixDaemon::restore_saved_states(const std::unordered_map<std::string, ModuleState>& saved_states) {
+    if (saved_states.empty()) return;
+
+    // First, enable modules that were at least enabled previously (Initialized/Running/Stopped)
+    // Compute a global dependency-aware order.
+    std::vector<std::string> to_enable_vec;
+    to_enable_vec.reserve(saved_states.size());
+    for (const auto& [name, desired_state] : saved_states) {
+        if (desired_state == ModuleState::INITIALIZED || desired_state == ModuleState::RUNNING || desired_state == ModuleState::STOPPED) {
+            if (module_registry_.find(name) != module_registry_.end()) {
+                to_enable_vec.push_back(name);
+            } else {
+                std::cout << "Skipping restore for '" << name << "': not installed" << std::endl;
+            }
+        }
+    }
+
+    if (!to_enable_vec.empty()) {
+        auto res = dependency_resolver_->resolve_dependencies(to_enable_vec);
+        if (!res.success) {
+            std::cerr << "Restore: dependency resolution reported issues; proceeding with simple order" << std::endl;
+        }
+        const auto& order = res.load_order.empty() ? to_enable_vec : res.load_order;
+        std::set<std::string> enable_set(to_enable_vec.begin(), to_enable_vec.end());
+        for (const auto& name : order) {
+            auto it = module_registry_.find(name);
+            if (it == module_registry_.end()) continue;
+            // Only enable if it was desired (or it is a dependency needed to reach desired modules)
+            if (it->second.state == ModuleState::INSTALLED) {
+                bool ok = enable_module(name);
+                if (!ok) {
+                    std::cerr << "Restore: enable failed for '" << name << "': " << last_error_ << std::endl;
+                }
+            }
+        }
+    }
+
+    // Next, start modules that were running previously (dependency-aware order as well)
+    std::vector<std::string> to_start_vec;
+    to_start_vec.reserve(saved_states.size());
+    for (const auto& [name, desired_state] : saved_states) {
+        if (desired_state == ModuleState::RUNNING && module_registry_.find(name) != module_registry_.end()) {
+            to_start_vec.push_back(name);
+        }
+    }
+    if (!to_start_vec.empty()) {
+        auto res2 = dependency_resolver_->resolve_dependencies(to_start_vec);
+        const auto& order2 = res2.load_order.empty() ? to_start_vec : res2.load_order;
+        for (const auto& name : order2) {
+            auto it = module_registry_.find(name);
+            if (it == module_registry_.end()) continue;
+            if (it->second.state == ModuleState::INITIALIZED || it->second.state == ModuleState::STOPPED) {
+                bool ok = start_module(name);
+                if (!ok) {
+                    std::cerr << "Restore: start failed for '" << name << "': " << last_error_ << std::endl;
+                }
+            }
+        }
     }
 }
 

@@ -5,9 +5,9 @@ This directory indexes public APIs and points to headers in `include/helix/`.
 ## Module Development Kit (MDK)
 
 - `include/helix/module.h`
-  - Recommended macros (short aliases): `HELIX_INIT(name)`, `HELIX_START(name)`, `HELIX_STOP(name)`, `HELIX_DISABLE(name)`.
-  - Optional: `HELIX_MODULE_DECLARE` to expose runtime accessors (`helix_module_get_name`, `helix_module_get_version`, ...). Most modules can omit this since metadata comes from `manifest.json`.
-  - Context struct: `helix::ModuleContext`
+  - Macros to declare entry points: `HELIX_MODULE_INIT[_AS]`, `HELIX_MODULE_START[_AS]`, `HELIX_MODULE_STOP[_AS]`, `HELIX_MODULE_DESTROY[_AS]`.
+  - Optional: `HELIX_MODULE_DECLARE(name, version, description, author)` to expose runtime accessors. Most modules can omit this since metadata comes from `manifest.json`.
+  - Context helper: `HELIX_MODULE_CONTEXT()` yields a `helix::ModuleContext` with basic info.
 
 Entry points that modules must export (default symbols):
 
@@ -37,3 +37,25 @@ Use the MDK macros `HELIX_MODULE_*_AS(symbol)` to define functions with custom n
 - `include/helix/dependency_resolver.h` — dependency resolution interfaces
 
 Refer to `src/` for implementation details.
+
+## Logging API
+
+- Header: `include/helix/log.h`
+- For modules: call `helix_log(const char* module_name, const char* message, HelixLogLevel level)`.
+  - If no logger is present yet, messages are queued in a bounded buffer (256 msgs) and flushed later.
+  - Once the dispatcher symbol `helix_log_dispatch` becomes available (exported by the daemon/log registry), messages are dispatched to all registered sinks.
+- For logger modules: register and unregister your sink function at `start()`/`stop()` time:
+
+```cpp
+using LogSink = void(*)(const char*, int, const char*);
+static void my_sink(const char* mod, int lvl, const char* msg) { /* write somewhere */ }
+
+if (auto reg = helix_log_get_register()) reg(&my_sink);
+// ... on stop
+if (auto unreg = helix_log_get_unregister()) unreg(&my_sink);
+```
+
+Notes:
+
+- Levels: `HELIX_LOG_DEBUG`, `HELIX_LOG_INFO`, `HELIX_LOG_WARN`, `HELIX_LOG_ERROR`.
+- Threading: `helix_log()` uses a mutex-protected queue and dlsym lookups; it’s safe to call from module worker threads. Sinks should do minimal work or hand off asynchronously to avoid stalling producers.

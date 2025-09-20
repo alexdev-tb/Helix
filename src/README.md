@@ -51,7 +51,7 @@ From the build dir:
 
 ```bash
 mkdir -p modules
-./helixd ./modules
+./helixd --modules-dir ./modules --socket /tmp/helixd.sock --foreground
 ```
 
 Useful daemon commands: `status`, `list`, `install <path>`, `enable <name>`,
@@ -59,11 +59,11 @@ Useful daemon commands: `status`, `list`, `install <path>`, `enable <name>`,
 
 ## Examples
 
-See `examples/hello_module` (raw C API) and `examples/modern_hello` (macro helpers).
+See `modules/examples/hello_module` (raw C API) and `modules/examples/modern_hello` (macro helpers).
 Use `tools/helxcompiler` to build a `.helx`:
 
 ```bash
-./helxcompiler -v -o modern_hello.helx ../examples/modern_hello/
+./helxcompiler -v -o hello-module.helx ../modules/examples/hello_module/
 ```
 
 ## Module package format

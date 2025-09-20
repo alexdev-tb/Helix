@@ -138,6 +138,13 @@ public:
      * @return String representation of state
      */
     static std::string state_to_string(ModuleState state);
+    
+    /**
+     * @brief Parse module state from string
+     * @param state_str String representation (e.g., "Installed", "Running")
+     * @return ModuleState enum value (UNKNOWN if not recognized)
+     */
+    static ModuleState state_from_string(const std::string& state_str);
 
     /**
      * @brief Get last error message from the most recent failed operation
@@ -198,6 +205,31 @@ private:
      * @return true if dependencies were resolved successfully, false otherwise
      */
     bool resolve_and_load_dependencies(const std::string& module_name);
+
+    // --- State persistence helpers ---
+    /**
+     * @brief Return the path to the daemon state file
+     */
+    std::string state_file_path() const;
+
+    /**
+     * @brief Save current module states to disk for restoration on next start
+     * @return true on success, false on failure
+     */
+    bool save_module_states() const;
+
+    /**
+     * @brief Load saved module states from disk
+     * @param out_states Map of module name -> saved state
+     * @return true if loaded successfully (or file not present), false on parse/read errors
+     */
+    bool load_saved_module_states(std::unordered_map<std::string, ModuleState>& out_states) const;
+
+    /**
+     * @brief Apply previously saved states by enabling/starting modules as needed
+     * @param saved_states Map of module name -> desired state
+     */
+    void restore_saved_states(const std::unordered_map<std::string, ModuleState>& saved_states);
 };
 
 } // namespace helix

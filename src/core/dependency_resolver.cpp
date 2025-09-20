@@ -208,21 +208,24 @@ bool DependencyResolver::topological_sort(const std::vector<std::string>& target
         }
     }
 
-    // Calculate in-degrees for topological sort
+    // Calculate in-degrees as the number of dependencies each module has within the subset.
+    // With edges represented as module -> dependency in dependency_graph_,
+    // the correct dependency-first order is achieved by:
+    //  - in_degree[module] = number of deps in subset
+    //  - when removing a node U (a dependency), decrement in_degree of its dependents
+    //    using reverse_graph_[U].
     std::unordered_map<std::string, int> in_degree;
     for (const auto& module : all_needed) {
-        in_degree[module] = 0;
-    }
-    
-    for (const auto& module : all_needed) {
+        int deg = 0;
         auto deps_it = dependency_graph_.find(module);
         if (deps_it != dependency_graph_.end()) {
             for (const auto& dep : deps_it->second) {
                 if (all_needed.find(dep) != all_needed.end()) {
-                    in_degree[dep]++;
+                    ++deg;
                 }
             }
         }
+        in_degree[module] = deg;
     }
 
     // Kahn's algorithm for topological sort
@@ -238,13 +241,13 @@ bool DependencyResolver::topological_sort(const std::vector<std::string>& target
         zero_in_degree.pop();
         load_order.push_back(current);
 
-        auto deps_it = dependency_graph_.find(current);
-        if (deps_it != dependency_graph_.end()) {
-            for (const auto& dep : deps_it->second) {
-                if (all_needed.find(dep) != all_needed.end()) {
-                    in_degree[dep]--;
-                    if (in_degree[dep] == 0) {
-                        zero_in_degree.push(dep);
+        // Decrement in-degree of dependents of 'current'
+        auto rev_it = reverse_graph_.find(current);
+        if (rev_it != reverse_graph_.end()) {
+            for (const auto& dependent : rev_it->second) {
+                if (all_needed.find(dependent) != all_needed.end()) {
+                    if (--in_degree[dependent] == 0) {
+                        zero_in_degree.push(dependent);
                     }
                 }
             }

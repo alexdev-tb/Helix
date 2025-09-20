@@ -30,15 +30,58 @@ bool ManifestParser::parse_from_string(const std::string& json_content, ModuleMa
     last_error_.clear();
     
     try {
-        // Basic JSON parsing using regex (simplified approach)
-    // Extract string fields
-        std::regex string_field_regex("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"");
-        std::sregex_iterator iter(json_content.begin(), json_content.end(), string_field_regex);
-        std::sregex_iterator end;
-
+        // Basic JSON parsing using a tiny top-level scanner to avoid nested collisions
+        // Only extract string fields at the top level of the root object
         std::unordered_map<std::string, std::string> fields;
-        for (; iter != end; ++iter) {
-            fields[(*iter)[1].str()] = (*iter)[2].str();
+        {
+            bool in_string = false;
+            int obj_depth = 0;
+            size_t i = 0;
+            // Find the first '{' to enter root object
+            while (i < json_content.size() && json_content[i] != '{') ++i;
+            if (i < json_content.size()) ++obj_depth, ++i;
+            auto read_string = [&](size_t& idx) -> std::string {
+                std::string out;
+                // assume json_content[idx] == '"'
+                ++idx; // skip opening quote
+                bool esc = false;
+                for (; idx < json_content.size(); ++idx) {
+                    char c = json_content[idx];
+                    if (esc) { out.push_back(c); esc = false; continue; }
+                    if (c == '\\') { esc = true; continue; }
+                    if (c == '"') { ++idx; break; }
+                    out.push_back(c);
+                }
+                return out;
+            };
+            auto skip_ws = [&](size_t& idx){ while (idx < json_content.size() && (json_content[idx]==' '||json_content[idx]=='\n'||json_content[idx]=='\r'||json_content[idx]=='\t')) ++idx; };
+            for (; i < json_content.size() && obj_depth > 0; ++i) {
+                char c = json_content[i];
+                if (c == '"') {
+                    // At top-level (obj_depth==1) and not currently in a string, this may be a key
+                    // Read key then value if this is indeed a key position (followed by ':')
+                    size_t key_pos = i;
+                    std::string key = read_string(i);
+                    size_t j = i; skip_ws(j);
+                    if (j < json_content.size() && json_content[j] == ':') {
+                        ++j; skip_ws(j);
+                        if (j < json_content.size() && json_content[j] == '"' && obj_depth == 1) {
+                            std::string val = read_string(j);
+                            fields[key] = val;
+                            i = j - 1; // continue after value
+                            continue;
+                        }
+                    }
+                    // Not a simple string value; continue scanning
+                    i = key_pos; // reset to the original quote so outer loop handles it
+                } else if (c == '{') {
+                    ++obj_depth;
+                } else if (c == '}') {
+                    --obj_depth;
+                } else if (c == '\\') {
+                    // skip next char if inside string; handled by read_string when in string context
+                }
+            }
         }
 
         // Extract required fields
@@ -64,7 +107,7 @@ bool ManifestParser::parse_from_string(const std::string& json_content, ModuleMa
         }
 
         // Extract optional fields
-        manifest.description = fields.count("description") ? fields["description"] : "";
+    manifest.description = fields.count("description") ? fields["description"] : "";
         manifest.author = fields.count("author") ? fields["author"] : "";
         manifest.license = fields.count("license") ? fields["license"] : "";
         manifest.minimum_api_version = fields.count("minimum_api_version") ? fields["minimum_api_version"] : "";

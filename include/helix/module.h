@@ -11,6 +11,7 @@
 
 #include <string>
 #include <iostream>
+#include "helix/log.h"
 
 namespace helix {
 
@@ -166,11 +167,6 @@ struct ModuleContext {
  *   HELIX_STOP(my_stop) { ... return 0; }
  *   HELIX_DISABLE(my_destroy) { ... }
  */
-#define HELIX_INIT(sym)     HELIX_MODULE_INIT_AS(sym)
-#define HELIX_START(sym)    HELIX_MODULE_START_AS(sym)
-#define HELIX_STOP(sym)     HELIX_MODULE_STOP_AS(sym)
-#define HELIX_DISABLE(sym)  HELIX_MODULE_DESTROY_AS(sym)
-#define HELIX_DESTROY(sym)  HELIX_MODULE_DESTROY_AS(sym)
 
 /**
  * @brief Helper macro to get module context
@@ -199,7 +195,7 @@ struct ModuleContext {
  * HELIX_MODULE_LOG("Module is doing something important");
  */
 #define HELIX_MODULE_LOG(message) \
-    std::cout << "[" << HELIX_MODULE_NAME << "] " << message << std::endl
+    helix_log(HELIX_MODULE_NAME, (std::string(message)).c_str(), HELIX_LOG_INFO)
 
 /**
  * @brief Log an error from the module
@@ -208,6 +204,6 @@ struct ModuleContext {
  * HELIX_MODULE_ERROR("Something went wrong!");
  */
 #define HELIX_MODULE_ERROR(message) \
-    std::cerr << "[" << HELIX_MODULE_NAME << "] ERROR: " << message << std::endl
+    helix_log(HELIX_MODULE_NAME, (std::string(message)).c_str(), HELIX_LOG_ERROR)
 
 #endif // HELIX_MODULE_H

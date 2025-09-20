@@ -36,8 +36,8 @@ bool ModuleLoader::load_module(const std::string& module_path, const std::string
         return false;
     }
 
-    // Load the shared library
-    void* handle = dlopen(module_path.c_str(), RTLD_LAZY);
+    // Load the shared library with RTLD_GLOBAL so symbols are visible to other modules
+    void* handle = dlopen(module_path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
     if (!handle) {
         std::cerr << "Failed to load module '" << module_name << "': " << dlerror() << std::endl;
         return false;

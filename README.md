@@ -13,6 +13,7 @@ each other.
 - Module lifecycle: install, enable, start, stop, disable, uninstall
 - Dependency resolution from manifests
 - Example modules and a module compiler
+- Pluggable, multi-sink logging via logger modules (modules call `helix_log()`; sinks subscribe)
 
 ## Current status
 
@@ -54,14 +55,14 @@ or edit `cmake/Version.cmake`. The value propagates to all targets and a generat
 2. Create a `.helx` from an example module (from the build dir):
 
 ```bash
-./helxcompiler -v -o modern_hello.helx ../examples/modern_hello/
+./helxcompiler -v -o hello-module.helx ../modules/examples/hello_module/
 ```
 
 3. Run the daemon and install your module:
 
 ```bash
 mkdir -p modules
-printf "install modern_hello.helx\nenable modern-hello\nstart modern-hello\nstatus\nexit\n" \
+printf "install hello-module.helx\nenable hello-module\nstart hello-module\nstatus\nexit\n" \
   | ./helixd ./modules
 ```
 
@@ -80,15 +81,19 @@ For convenience, `include/helix/module.h` provides helper macros like
 `HELIX_MODULE_INIT`, etc. Metadata (name/version/description/author) is read from `manifest.json`,
 so `HELIX_MODULE_DECLARE` is optional.
 
+Lifecycle performance: lifecycle calls (`init/start/stop/destroy`) are synchronous on the daemon’s control thread. Keep them short and non-blocking; do long-running work in your own threads and return promptly. See `docs/architecture.md#concurrency-and-threading-model`.
+
 ## Repository layout
 
 - `include/helix/` — public headers (module API, daemon, loader)
 - `src/` — core and daemon implementation
 - `tools/helxcompiler/` — the module compiler
-- `examples/` — example modules you can build and run
+- `modules/examples/` — example modules you can build and run
 - `docs/` — usage guide, architecture notes, ADR/RFC templates
 - `api/` — API docs pointers and index
 - `CHANGELOG.md` — notable changes
+
+Logging API overview: `include/helix/log.h` provides `helix_log()` which queues until a Logger module registers a sink and then dispatches to all sinks. The framework doesn’t print logs by itself.
 
 ## Contributing
 

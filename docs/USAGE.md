@@ -32,12 +32,58 @@ Artifacts appear under the chosen build dir: `build-debug/` or `build-release/`.
 - `helxcompiler` — compiles modules and produces `.helx`
 - Static libs: `libhelix-core.a`, `libhelix-daemon.a`
 
+### Logging (multi-sink)
+
+Helix doesn't print module messages from core. Modules call a tiny API and one or more Logger modules receive and handle logs.
+
+- In code, include `helix/log.h` and call:
+
+  - `helix_log("MyModule", "Initializing...", HELIX_LOG_INFO);`
+
+- The call is a no-op until a Logger module is enabled and started. Messages are queued (up to 256) and flushed once logging is available.
+- Multiple Logger modules can register concurrently; all receive every log message.
+
+Quick start with the example logger:
+
+```bash
+# From the build directory
+./helixd --modules-dir ./modules --foreground &
+./helixctl install modules/logger-module.helx
+./helixctl enable Logger-module
+./helixctl start Logger-module
+
+# Now install/enable/start your other modules; their helix_log() calls will appear
+./helixctl install modules/hello-module.helx
+./helixctl enable hello-module
+./helixctl start hello-module
+```
+
+Implementing a Logger module:
+
+- Logger modules register a sink function when they start and can unregister it when they stop:
+
+```c++
+using LogSink = void(*)(const char* module, int level, const char* msg);
+
+static void my_sink(const char* module, int level, const char* msg) { /* format + write */ }
+
+if (auto reg = helix_log_get_register()) reg(&my_sink);
+// ... later on stop
+if (auto unreg = helix_log_get_unregister()) unreg(&my_sink);
+```
+
+Levels available: `HELIX_LOG_DEBUG`, `HELIX_LOG_INFO`, `HELIX_LOG_WARN`, `HELIX_LOG_ERROR`.
+
+### Keep lifecycle non-blocking
+
+The daemon calls `init/start/stop/destroy` synchronously on its control thread. Keep these functions short and non-blocking: start worker threads in `start()` and return immediately; on `stop()`, signal and join with a bounded wait. This ensures other modules and IPC commands remain responsive.
+
 ## Compile a module to .helx
 
 From within the build dir:
 
 ```bash
-./helxcompiler -v -o modern_hello.helx ../examples/modern_hello/
+./helxcompiler -v -o hello-module.helx ../modules/examples/hello_module/
 ```
 
 `helxcompiler` options:
@@ -93,14 +139,13 @@ You can also pass the modules directory positionally for backward compatibility:
 
 ```bash
 ./helixd --modules-dir ./modules
-# or equivalently
-./helixd ./modules
+./helixd --socket /tmp/helixd.sock --foreground --interactive  # legacy CLI
 ```
 
 Quick demo (non-interactive):
 
 ```bash
-printf "install modern_hello.helx\nenable modern-hello\nstart modern-hello\nstatus\nexit\n" | ./helixd ./modules
+printf "install hello-module.helx\nenable hello-module\nstart hello-module\nstatus\nexit\n" | ./helixd ./modules
 ```
 
 ## Running as a background service
@@ -153,7 +198,7 @@ uninstall <name>
 
 ## Custom entry points
 
-You can name your lifecycle functions however you like and declare them in `manifest.json`:
+You can name your lifecycle functions and declare them in `manifest.json`:
 
 ```json
 "entry_points": {
@@ -164,18 +209,21 @@ You can name your lifecycle functions however you like and declare them in `mani
 }
 ```
 
-In code, use the short MDK macros to define custom symbols:
-
-// HELIX*START(my_start) { /* ... _/ }
-// HELIX_INIT(my_init) { /_ ... _/ return 0; }
-// HELIX_STOP(my_stop) { /_ ... _/ return 0; }
-// HELIX_DISABLE(my_destroy) { /_ ... \_/ }
-
-The longer forms (`HELIX_MODULE_*_AS`) remain supported for backward compatibility.
-
 The compiler can also set these via flags:
 
 - `--ep-init <symbol>`
 - `--ep-start <symbol>`
 - `--ep-stop <symbol>`
 - `--ep-destroy <symbol>`
+
+## Module state persistence
+
+Helixd persists the last known module states to a small JSON file in the modules directory named `.helix_state.json`.
+
+- On shutdown, it records whether each module was Installed, Initialized, Stopped, or Running.
+- On the next startup, after scanning installed modules, helixd best-effort restores those states:
+  - Modules previously Initialized/Stopped/Running are automatically enabled (with dependency resolution).
+  - Modules previously Running are automatically started if enabling succeeds.
+  - Missing modules or failures to enable/start are logged but do not block daemon startup.
+
+Delete `.helix_state.json` to reset restoration behavior; helixd will then start with all modules in the Installed state.

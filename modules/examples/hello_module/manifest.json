@@ -5,8 +5,11 @@
   "author": "Helix Framework",
   "license": "MIT",
   "binary_path": "libhello-module.so",
-  "minimum_api_version": "1.0.0",
-  "dependencies": [],
+  "minimum_api_version": "2.0.0",
+  "minimum_core_version": "2.1.0",
+  "dependencies": [
+    { "name": "ConsoleLogger", "version": "1.0.0", "optional": false }
+  ],
   "capabilities": [],
   "config": {},
   "homepage": "",

@@ -8,6 +8,22 @@ All notable changes to this project will be documented in this file.
 - RFC/ADR templates for contribution workflow
 - Additional examples and docs improvements
 
+Docs refresh:
+
+- Updated paths to examples under `modules/examples/` across README, USAGE, src/README, and assistant guide.
+- Documented `helixctl`, IPC socket control, and systemd service install.
+- Clarified logging flow and dispatcher symbol in API and architecture docs.
+- Corrected quickstart commands and `helxcompiler` usage examples.
+- Refreshed assistant working guide under `.github/instructions/instructions.md` to be accurate.
+
+Docs:
+
+- Architecture: added "Concurrency and threading model" section documenting synchronous lifecycle and guidance for non-blocking modules.
+- API: expanded logging API docs (`helix/log.h` queueing/dispatch, sink registration, levels, threading notes).
+- Usage: added note on keeping lifecycle non-blocking; clarified logging behavior.
+- README: highlighted multi-sink logging; linked to concurrency section.
+- CONTRIBUTING: updated to reflect active codebase and docs-first workflow; added coding/versioning guidelines.
+
 Improvements:
 
 - helixd: add `-h/--help` and `--modules-dir <path>` flags; print usage and exit
