@@ -165,8 +165,8 @@ void modern_hello_set_message(const char* msg) {
         } else {
             base_message = "Hello from Helix!";
         }
+        HELIX_MODULE_LOG("Message updated to: " + base_message);
     }
-    HELIX_MODULE_LOG("Message updated to: " + base_message);
 }
 
 // Emit an immediate message (does not wait for interval)
