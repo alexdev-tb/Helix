@@ -246,7 +246,8 @@ bool DependencyResolver::topological_sort(const std::vector<std::string>& target
         if (rev_it != reverse_graph_.end()) {
             for (const auto& dependent : rev_it->second) {
                 if (all_needed.find(dependent) != all_needed.end()) {
-                    if (--in_degree[dependent] == 0) {
+                    --in_degree[dependent];
+                    if (in_degree[dependent] == 0) {
                         zero_in_degree.push(dependent);
                     }
                 }
