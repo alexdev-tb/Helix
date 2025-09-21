@@ -1,0 +1,17 @@
+{
+  "name": "ConsoleLogger",
+  "version": "1.0.0",
+  "description": "The default logger for Helix",
+  "author": "Helix Framework",
+  "license": "MIT",
+  "binary_path": "libConsoleLogger.so",
+  "minimum_api_version": "0.1.0",
+  "minimum_core_version": "0.1.0",
+  "dependencies": [],
+  "entry_points": {
+    "init": "logger_init",
+    "start": "logger_start",
+    "stop": "logger_stop",
+    "destroy": "logger_destroy"
+  }
+}

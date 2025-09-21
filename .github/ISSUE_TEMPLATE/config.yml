@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Helix README
+    url: https://github.com/alexdev-tb/Helix#readme
+    about: Start here for project overview and quickstart
+  - name: Usage Guide
+    url: https://github.com/alexdev-tb/Helix/blob/main/docs/USAGE.md
+    about: How to build, run, and use Helix

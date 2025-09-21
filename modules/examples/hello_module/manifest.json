@@ -1,0 +1,13 @@
+{
+  "name": "hello-world",
+  "version": "1.0.0",
+  "description": "A simple hello world module for Helix",
+  "author": "Helix Framework",
+  "license": "MIT",
+  "binary_path": "libhello-world.so",
+  "minimum_api_version": "0.1.0",
+  "minimum_core_version": "0.1.0",
+  "dependencies": [
+    { "name": "ConsoleLogger", "version": "1.0.0", "optional": false }
+  ]
+}

@@ -1,0 +1,32 @@
+name: Documentation improvement
+description: Report typos, gaps, or propose docs enhancements
+title: "[DOCS] <short description>"
+labels: [documentation]
+body:
+  - type: textarea
+    id: scope
+    attributes:
+      label: Affected docs
+      description: Which page(s) or file(s) (e.g., README.md, docs/USAGE.md)? Provide links.
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue
+    attributes:
+      label: Issue description
+      description: What's wrong or missing? Provide examples.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested changes
+      description: Propose wording or structure changes if you can.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, links, or references.

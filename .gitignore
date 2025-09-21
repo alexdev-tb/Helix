@@ -1,0 +1,28 @@
+# General
+.DS_Store
+Thumbs.db
+.env
+.cache/
+.idea/
+**/.history/
+.github/*.md
+.vscode/
+
+# Editor/IDE
+# We keep recommended VS Code settings/tasks in version control for contributors.
+# If you prefer to ignore local editor settings, uncomment the next line.
+# .vscode/
+
+# CMake build directories and artifacts
+build*/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+
+# Compilation database
+compile_commands.json
+
+# Packages and archives
+*.helx
+*.tar.gz
