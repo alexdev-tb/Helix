@@ -39,9 +39,9 @@ inline void format_timestamp(char* buf, size_t len) noexcept {
     std::tm tm = *std::localtime(&t);
 #endif
     // Format: YYYY-MM-DD HH:MM:SS.mmm
-    std::snprintf(buf, len, "%04d-%02d-%02d %02d:%02d:%02d.%03ld",
+    std::snprintf(buf, len, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
                   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                  tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<long>(ms));
+                  tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<int>(ms));
 }
 
 static void logger_sink_stdout(const char* module_name, int level, const char* message) {
