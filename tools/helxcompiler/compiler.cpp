@@ -11,8 +11,7 @@ using nlohmann::json;
 #include <cstdlib>
 #include <algorithm>
 #include <chrono>
-#include <archive.h>
-#include <archive_entry.h>
+#include <unistd.h>
 #include "helix/manifest.h"
 #include "helix/version.h"
 
