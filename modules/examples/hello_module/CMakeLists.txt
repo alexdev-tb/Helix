@@ -7,7 +7,7 @@ set(HELXCOMPILER_EXE ${CMAKE_BINARY_DIR}/helxcompiler)
 
 add_custom_target(hello_module_helx ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory ${MODULES_DIR}
-    COMMAND ${HELXCOMPILER_EXE} -v -n hello-module -o ${MODULES_DIR}/hello-module.helx ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND ${HELXCOMPILER_EXE} -v -o ${MODULES_DIR}/hello-module.helx ${CMAKE_CURRENT_SOURCE_DIR}
     BYPRODUCTS ${MODULES_DIR}/hello-module.helx
     COMMENT "Building hello-module.helx with helxcompiler"
 )

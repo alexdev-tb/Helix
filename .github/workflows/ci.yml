@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.compiler }} ${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [Release, Debug]
+    env:
+      CC: ${{ matrix.compiler == 'clang' && 'clang' || 'gcc' }}
+      CXX: ${{ matrix.compiler == 'clang' && 'clang++' || 'g++' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build ccache ${{ matrix.compiler == 'clang' && 'clang' || 'g++' }}
+
+      - name: Show compiler version
+        run: |
+          ${CXX} --version
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_C_COMPILER=${{ env.CC }} \
+            -DCMAKE_CXX_COMPILER=${{ env.CXX }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: "Smoke test (helxcompiler: build modules)"
+        run: |
+          cd build
+          # Build ConsoleLogger and hello example modules into .helx packages
+          ./helxcompiler -v -o consolelogger.helx ../modules/default/ConsoleLogger/
+          test -f consolelogger.helx
+          ./helxcompiler -v -o hello-module.helx ../modules/examples/hello_module/
+          test -f hello-module.helx
+
+      - name: Smoke test (helixd/helixctl)
+        run: |
+          set -euo pipefail
+          cd build
+          mods_dir="$(mktemp -d)"
+          # Start daemon in background
+          ./helixd --modules-dir "$mods_dir" --socket /tmp/helixd.sock --foreground &
+          HELIXD_PID=$!
+          trap 'kill -TERM ${HELIXD_PID} 2>/dev/null || true; wait ${HELIXD_PID} 2>/dev/null || true' EXIT
+          # Wait up to ~10s for socket to appear
+          for i in $(seq 1 100); do [ -S /tmp/helixd.sock ] && break; sleep 0.1; done
+          test -S /tmp/helixd.sock
+          # Query version and status (must succeed)
+          ./helixctl --socket /tmp/helixd.sock --version
+          ./helixctl --socket /tmp/helixd.sock status
+          # First: install, enable, start ConsoleLogger
+          HELX_LOGGER="$(pwd)/consolelogger.helx"
+          test -f "$HELX_LOGGER"
+          ./helixctl --socket /tmp/helixd.sock install "$HELX_LOGGER" | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock enable ConsoleLogger | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock start ConsoleLogger | grep -E '^OK$'
+          # Verify logger running
+          ./helixctl --no-color --socket /tmp/helixd.sock info ConsoleLogger | grep -E '^state=Running$'
+          # Then: install, enable, start hello example module
+          HELX="$(pwd)/hello-module.helx"
+          test -f "$HELX"
+          ./helixctl --socket /tmp/helixd.sock install "$HELX" | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock enable hello-module | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock start hello-module | grep -E '^OK$'
+          # Verify running state without ANSI colors
+          ./helixctl --no-color --socket /tmp/helixd.sock info hello-module | grep -E '^state=Running$'
+          # Tear down lifecycle and uninstall (stop hello first, then logger)
+          ./helixctl --socket /tmp/helixd.sock stop hello-module | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock disable hello-module | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock uninstall hello-module | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock stop ConsoleLogger | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock disable ConsoleLogger | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock uninstall ConsoleLogger | grep -E '^OK$'
+          # Stop daemon and cleanup
+          kill -TERM ${HELIXD_PID}
+          wait ${HELIXD_PID} || true
+          trap - EXIT
+
+      - name: Upload build artifacts (binaries)
+        if: matrix.build_type == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: helix-${{ matrix.compiler }}-${{ matrix.build_type }}
+          path: |
+            build/helixd
+            build/helixctl
+            build/helxcompiler
+            build/libhelix-core.a
+            build/libhelix-daemon.a
