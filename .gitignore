@@ -8,11 +8,6 @@ Thumbs.db
 .github/*.md
 .vscode/
 
-# Editor/IDE
-# We keep recommended VS Code settings/tasks in version control for contributors.
-# If you prefer to ignore local editor settings, uncomment the next line.
-# .vscode/
-
 # CMake build directories and artifacts
 build*/
 build-*/
