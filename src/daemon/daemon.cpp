@@ -10,10 +10,30 @@
 #include <set>
 #ifdef __unix__
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #endif
 
 
 namespace helix {
+
+static int run_program(const std::vector<std::string>& args) {
+    if (args.empty()) return -1;
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        std::vector<char*> argv; argv.reserve(args.size() + 1);
+        for (const auto& s : args) argv.push_back(const_cast<char*>(s.c_str()));
+        argv.push_back(nullptr);
+        execvp(argv[0], argv.data());
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return -1;
+}
 
 HelixDaemon::HelixDaemon() 
     : modules_directory_(""), 
@@ -138,10 +158,8 @@ bool HelixDaemon::install_module(const std::string& package_path) {
             std::string temp_dir = modules_directory_ + "/.tmp_install_" + std::to_string(suffix);
             try { std::filesystem::create_directories(temp_dir); } catch (...) {}
 
-            // Extract archive using system tar for now
-            std::stringstream cmd;
-            cmd << "tar -xzf \"" << package_path << "\" -C \"" << temp_dir << "\"";
-            int rc = std::system(cmd.str().c_str());
+            // Extract archive using exec (avoid shell)
+            int rc = run_program({"tar", "-xzf", package_path, "-C", temp_dir});
             if (rc != 0) {
                 std::cerr << "Failed to extract .helx package: exit code " << rc << std::endl;
                 set_last_error("Extract failed: tar exit code " + std::to_string(rc));
@@ -289,10 +307,10 @@ bool HelixDaemon::enable_module(const std::string& module_name) {
         return false;
     }
 
-    // Resolve and load dependencies first
+    // Resolve and load (and start) dependencies first
     if (!resolve_and_load_dependencies(module_name)) {
         // Do not transition to ERROR on dependency issues; leave as INSTALLED so the user can retry
-        set_last_error("Dependency resolution failed");
+        if (last_error_.empty()) set_last_error("Dependency resolution failed");
         std::cerr << "Enable aborted for '" << module_name << "': dependencies not satisfied" << std::endl;
         return false;
     }
@@ -589,20 +607,36 @@ bool HelixDaemon::resolve_and_load_dependencies(const std::string& module_name) 
     
     if (!result.success) {
         std::cerr << "Failed to resolve dependencies for " << module_name << std::endl;
-        if (!result.missing_deps.empty()) {
-            std::cerr << "Missing dependencies: ";
-            for (const auto& dep : result.missing_deps) {
-                std::cerr << dep << " ";
+        // Build a detailed error for clients
+        std::ostringstream err;
+        err << "Dependency resolution failed for '" << module_name << "'";
+        // Declared dependencies from manifest
+        auto it_mod = module_registry_.find(module_name);
+        if (it_mod != module_registry_.end()) {
+            const auto& deps = it_mod->second.manifest.dependencies;
+            if (!deps.empty()) {
+                err << "; required: ";
+                for (size_t i = 0; i < deps.size(); ++i) {
+                    err << deps[i].name;
+                    if (i + 1 < deps.size()) err << ", ";
+                }
             }
-            std::cerr << std::endl;
+        }
+        if (!result.missing_deps.empty()) {
+            err << "; missing: ";
+            for (size_t i = 0; i < result.missing_deps.size(); ++i) {
+                err << result.missing_deps[i];
+                if (i + 1 < result.missing_deps.size()) err << ", ";
+            }
         }
         if (!result.circular_deps.empty()) {
-            std::cerr << "Circular dependencies: ";
-            for (const auto& dep : result.circular_deps) {
-                std::cerr << dep << " ";
+            err << "; circular: ";
+            for (size_t i = 0; i < result.circular_deps.size(); ++i) {
+                err << result.circular_deps[i];
+                if (i + 1 < result.circular_deps.size()) err << ", ";
             }
-            std::cerr << std::endl;
         }
+        set_last_error(err.str());
         return false;
     }
 
@@ -615,7 +649,19 @@ bool HelixDaemon::resolve_and_load_dependencies(const std::string& module_name) 
         auto dep_it = module_registry_.find(dep_name);
         if (dep_it != module_registry_.end() && dep_it->second.state == ModuleState::INSTALLED) {
             if (!enable_module(dep_name)) {
+                set_last_error(std::string("Failed to enable dependency '") + dep_name + "': " + last_error_);
                 return false;
+            }
+        }
+        // Ensure dependency is running (not just enabled), per requirement
+        dep_it = module_registry_.find(dep_name);
+        if (dep_it != module_registry_.end() && dep_it->second.state != ModuleState::RUNNING) {
+            // If it's initialized or stopped, start it
+            if (dep_it->second.state == ModuleState::INITIALIZED || dep_it->second.state == ModuleState::STOPPED) {
+                if (!start_module(dep_name)) {
+                    set_last_error(std::string("Failed to start dependency '") + dep_name + "': " + last_error_);
+                    return false;
+                }
             }
         }
     }

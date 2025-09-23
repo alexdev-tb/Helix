@@ -12,6 +12,9 @@ using nlohmann::json;
 #include <algorithm>
 #include <chrono>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 #include "helix/manifest.h"
 #include "helix/version.h"
 
@@ -213,40 +216,46 @@ bool HelixCompiler::extract_module_metadata(const std::vector<std::string>& sour
 bool HelixCompiler::compile_shared_library(const CompileConfig& config,
                                          const std::vector<std::string>& source_files,
                                          const std::string& output_so) {
-    std::stringstream cmd;
-    cmd << "g++";
-    cmd << " -std=" << (config.cxx_standard.empty() ? "c++17" : config.cxx_standard);
-    if (!config.optimization_level.empty()) cmd << " " << config.optimization_level; else cmd << " -O2";
-    if (config.debug_info) cmd << " -g";
-    cmd << " -shared -fPIC";
+    std::vector<std::string> args;
+    args.push_back("g++");
+    args.push_back(std::string("-std=") + (config.cxx_standard.empty() ? "c++17" : config.cxx_standard));
+    args.push_back(config.optimization_level.empty() ? std::string("-O2") : config.optimization_level);
+    if (config.debug_info) args.push_back("-g");
+    args.push_back("-shared");
+    args.push_back("-fPIC");
 
     std::string base = source_files.empty() ? std::filesystem::current_path().string()
                                             : std::filesystem::path(source_files.front()).parent_path().string();
     std::string helixInclude = detect_helix_include(base);
     if (!helixInclude.empty()) {
-        cmd << " -I" << helixInclude;
+        args.push_back(std::string("-I") + helixInclude);
     }
-    for (const auto& inc : config.include_paths) cmd << " -I" << inc;
+    for (const auto& inc : config.include_paths) args.push_back(std::string("-I") + inc);
 
     if (!config.module_name.empty()) {
-        cmd << " -DHELIX_MODULE_NAME=\\\"" << config.module_name << "\\\"";
+        args.push_back(std::string("-DHELIX_MODULE_NAME=\"") + config.module_name + "\"");
     }
     if (!config.module_version.empty()) {
-        cmd << " -DHELIX_MODULE_VERSION=\\\"" << config.module_version << "\\\"";
+        args.push_back(std::string("-DHELIX_MODULE_VERSION=\"") + config.module_version + "\"");
     }
 
-    for (const auto& src : source_files) cmd << " " << src;
+    for (const auto& src : source_files) args.push_back(src);
 
-    for (const auto& libp : config.library_paths) cmd << " -L" << libp;
-    for (const auto& lib : config.libraries) cmd << " -l" << lib;
+    for (const auto& libp : config.library_paths) args.push_back(std::string("-L") + libp);
+    for (const auto& lib : config.libraries) args.push_back(std::string("-l") + lib);
 
-    cmd << " -pthread -ldl";
-    cmd << " -o " << output_so;
+    args.push_back("-pthread");
+    args.push_back("-ldl");
+    args.push_back("-o");
+    args.push_back(output_so);
 
-    if (config.verbose) std::cout << "Running: " << cmd.str() << std::endl;
+    if (config.verbose) {
+        std::ostringstream oss; for (const auto& a : args) { oss << a << ' '; }
+        std::cout << "Running: " << oss.str() << std::endl;
+    }
 
     std::string output;
-    int rc = run_command(cmd.str(), output);
+    int rc = run_program_capture(args, output);
     if (rc != 0) {
         set_error(std::string("Compilation failed: ") + output);
         return false;
@@ -402,14 +411,19 @@ bool HelixCompiler::validate_manifest_in_dir(const CompileConfig& config) {
 bool HelixCompiler::create_helx_package(const std::string& so_file,
                                        const std::string& manifest_file,
                                        const std::string& output_helx) {
-    std::stringstream cmd;
-    cmd << "tar -czf " << output_helx
-        << " -C " << std::filesystem::path(so_file).parent_path().string()
-        << " " << std::filesystem::path(so_file).filename().string()
-        << " " << std::filesystem::path(manifest_file).filename().string();
+    const std::string parent = std::filesystem::path(so_file).parent_path().string();
+    const std::string so_name = std::filesystem::path(so_file).filename().string();
+    const std::string mf_name = std::filesystem::path(manifest_file).filename().string();
+
+    std::vector<std::string> args = {
+        "tar", "-czf", output_helx,
+        "-C", parent,
+        so_name,
+        mf_name
+    };
 
     std::string output;
-    int rc = run_command(cmd.str(), output);
+    int rc = run_program_capture(args, output);
     if (rc != 0) {
         set_error(std::string("Failed to create .helx package: ") + output);
         return false;
@@ -417,13 +431,62 @@ bool HelixCompiler::create_helx_package(const std::string& so_file,
     return true;
 }
 
-int HelixCompiler::run_command(const std::string& command, std::string& output) {
-    FILE* pipe = popen(command.c_str(), "r");
-    if (!pipe) { output = "Failed to execute command"; return -1; }
-    char buffer[256];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) { output += buffer; }
-    int result = pclose(pipe);
-    return result;
+int HelixCompiler::run_program_capture(const std::vector<std::string>& args, std::string& output) {
+    output.clear();
+    if (args.empty()) return -1;
+    int stdout_pipe[2];
+    int stderr_pipe[2];
+    if (pipe(stdout_pipe) != 0) return -1;
+    if (pipe(stderr_pipe) != 0) { close(stdout_pipe[0]); close(stdout_pipe[1]); return -1; }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(stdout_pipe[0]); close(stdout_pipe[1]);
+        close(stderr_pipe[0]); close(stderr_pipe[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        // Child: connect pipes
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        dup2(stderr_pipe[1], STDERR_FILENO);
+        close(stdout_pipe[0]); close(stdout_pipe[1]);
+        close(stderr_pipe[0]); close(stderr_pipe[1]);
+        // Build argv
+        std::vector<char*> argv; argv.reserve(args.size() + 1);
+        for (const auto& s : args) argv.push_back(const_cast<char*>(s.c_str()));
+        argv.push_back(nullptr);
+        execvp(argv[0], argv.data());
+        _exit(127);
+    }
+    // Parent
+    close(stdout_pipe[1]);
+    close(stderr_pipe[1]);
+    // Read both pipes non-blocking merged
+    fcntl(stdout_pipe[0], F_SETFL, O_NONBLOCK);
+    fcntl(stderr_pipe[0], F_SETFL, O_NONBLOCK);
+
+    constexpr size_t BUFSZ = 4096;
+    char buf[BUFSZ];
+    int open_count = 2;
+    while (open_count > 0) {
+        ssize_t n = read(stdout_pipe[0], buf, BUFSZ);
+        if (n > 0) output.append(buf, buf + n);
+        else if (n == 0) { close(stdout_pipe[0]); stdout_pipe[0] = -1; --open_count; }
+
+        n = read(stderr_pipe[0], buf, BUFSZ);
+        if (n > 0) output.append(buf, buf + n);
+        else if (n == 0) { close(stderr_pipe[0]); stderr_pipe[0] = -1; --open_count; }
+
+        if (n < 0 && errno == EAGAIN) {
+            // Avoid busy wait
+            usleep(1000);
+        }
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return -1;
 }
 
 void HelixCompiler::set_error(const std::string& error) {

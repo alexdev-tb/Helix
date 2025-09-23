@@ -114,12 +114,12 @@ private:
                            const std::string& output_helx);
 
     /**
-     * @brief Run a shell command and capture output
-     * @param command Command to run
-     * @param output Output from command
-     * @return Exit code from command
+     * @brief Run a program (no shell) and capture stdout+stderr
+     * @param args argv list (args[0] must be program name, e.g., "g++")
+     * @param output Combined stdout+stderr
+     * @return Exit code (0 on success). -1 on exec/fork error.
      */
-    int run_command(const std::string& command, std::string& output);
+    int run_program_capture(const std::vector<std::string>& args, std::string& output);
 
     /**
      * @brief Set error message

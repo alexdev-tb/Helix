@@ -4,11 +4,14 @@
 #include <cerrno>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <filesystem>
 #include <fstream>
 #include <vector>
 #include <cstdlib>
+#include <sys/types.h>
+#include <sys/wait.h>
 // Do not include version macros here; helixctl queries the daemon for versions
 
 namespace fs = std::filesystem;
@@ -65,8 +68,36 @@ static std::string resolve_default_helixd_path(const char* /*argv0*/) {
         std::error_code ec;
         if (fs::exists(sibling, ec) && fs::is_regular_file(sibling, ec)) return sibling.string();
     }
-    // Fallback to PATH lookup by name
     return "helixd";
+}
+
+static int run_program(const std::vector<std::string>& args) {
+    if (args.empty()) return -1;
+    pid_t pid = ::fork();
+    if (pid < 0) {
+        return -1;
+    }
+    if (pid == 0) {
+        std::vector<char*> argv;
+        argv.reserve(args.size() + 1);
+        for (const auto& s : args) argv.push_back(const_cast<char*>(s.c_str()));
+        argv.push_back(nullptr);
+        ::execvp(argv[0], argv.data());
+        _exit(127);
+    }
+    int status = 0;
+    if (::waitpid(pid, &status, 0) < 0) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return -1;
+}
+
+static int run_systemctl(const std::vector<std::string>& args) {
+    std::vector<std::string> argv;
+    argv.reserve(args.size() + 1);
+    argv.emplace_back("systemctl");
+    argv.insert(argv.end(), args.begin(), args.end());
+    return run_program(argv);
 }
 
 static int install_service(const std::string& service_name,
@@ -88,7 +119,6 @@ static int install_service(const std::string& service_name,
         "[Install]\n"
         "WantedBy=multi-user.target\n";
 
-    // Optional socket unit for socket activation
     std::string socket_unit_path = "/etc/systemd/system/" + service_name + ".socket";
     std::string socket_unit =
         "[Unit]\n"
@@ -118,39 +148,30 @@ static int install_service(const std::string& service_name,
     }
 
     // Reload systemd
-    int r1 = std::system("systemctl daemon-reload");
+    int r1 = run_systemctl({"daemon-reload"});
     if (r1 != 0) {
         std::cerr << "systemctl daemon-reload failed (code " << r1 << ")" << std::endl;
         return 1;
     }
 
-    // Enable and start socket first (activates the service on demand)
-    std::string cmd = "systemctl enable --now " + service_name + ".socket";
-    int r2 = std::system(cmd.c_str());
+    int r2 = run_systemctl({"enable", "--now", service_name + ".socket"});
     if (r2 != 0) {
         std::cerr << "systemctl enable --now (socket) failed (code " << r2 << ")" << std::endl;
-        // continue to enable service directly as fallback
-        std::string cmd2 = "systemctl enable --now " + service_name;
-        int r3 = std::system(cmd2.c_str());
+        int r3 = run_systemctl({"enable", "--now", service_name});
         if (r3 != 0) {
             std::cerr << "systemctl enable --now (service) failed (code " << r3 << ")" << std::endl;
             return 1;
         }
     }
 
-    // Always ensure the service itself is enabled as well
     {
-        std::string svcEnable = "systemctl enable " + service_name + ".service";
-        (void)std::system(svcEnable.c_str());
+        (void)run_systemctl({"enable", service_name + ".service"});
     }
 
-    // Additionally, explicitly enable the socket and start the service now
-    // (even if socket activation is used) so modules are loaded immediately.
+
     {
-        std::string sockEnable = "systemctl enable " + service_name + ".socket";
-        (void)std::system(sockEnable.c_str());
-        std::string svcStart = "systemctl start " + service_name + ".service";
-        (void)std::system(svcStart.c_str());
+        (void)run_systemctl({"enable", service_name + ".socket"});
+        (void)run_systemctl({"start", service_name + ".service"});
     }
 
     std::cout << "Installed and started service/socket for '" << service_name << "'\n";
@@ -164,33 +185,24 @@ static int uninstall_service(const std::string& service_name) {
     std::string unit_path = "/etc/systemd/system/" + service_name + ".service";
     std::string socket_unit_path = "/etc/systemd/system/" + service_name + ".socket";
 
-    // Stop units if active (best-effort)
     {
-        std::string stopSocket = "systemctl stop " + service_name + ".socket";
-        (void)std::system(stopSocket.c_str());
-        std::string stopService = "systemctl stop " + service_name + ".service";
-        (void)std::system(stopService.c_str());
+        (void)run_systemctl({"stop", service_name + ".socket"});
+        (void)run_systemctl({"stop", service_name + ".service"});
     }
 
-    // Disable units (best-effort)
     {
-        std::string disableSocket = "systemctl disable " + service_name + ".socket";
-        (void)std::system(disableSocket.c_str());
-        std::string disableService = "systemctl disable " + service_name + ".service";
-        (void)std::system(disableService.c_str());
+        (void)run_systemctl({"disable", service_name + ".socket"});
+        (void)run_systemctl({"disable", service_name + ".service"});
     }
 
-    // Remove unit files
     std::error_code ec;
     bool removed_any = false;
     if (fs::exists(socket_unit_path, ec)) { fs::remove(socket_unit_path, ec); removed_any = true; }
     if (fs::exists(unit_path, ec)) { fs::remove(unit_path, ec); removed_any = true; }
 
-    // Reload systemd to pick up changes
-    int r = std::system("systemctl daemon-reload");
+    int r = run_systemctl({"daemon-reload"});
     if (r != 0) {
         std::cerr << "systemctl daemon-reload failed (code " << r << ")" << std::endl;
-        // continue
     }
 
     if (removed_any) {
