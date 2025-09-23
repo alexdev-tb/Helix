@@ -28,7 +28,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build ccache ${{ matrix.compiler == 'clang' && 'clang' || 'g++' }} libarchive-dev
+            cmake ninja-build ccache ${{ matrix.compiler == 'clang' && 'clang' || 'g++' }}
 
       - name: Show compiler version
         run: |
@@ -46,9 +46,12 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
-      - name: Smoke test (helxcompiler)
+      - name: "Smoke test (helxcompiler: build modules)"
         run: |
           cd build
+          # Build ConsoleLogger and hello example modules into .helx packages
+          ./helxcompiler -v -o consolelogger.helx ../modules/default/ConsoleLogger/
+          test -f consolelogger.helx
           ./helxcompiler -v -o hello-module.helx ../modules/examples/hello_module/
           test -f hello-module.helx
 
@@ -67,7 +70,15 @@ jobs:
           # Query version and status (must succeed)
           ./helixctl --socket /tmp/helixd.sock --version
           ./helixctl --socket /tmp/helixd.sock status
-          # Install, enable, start example module built earlier
+          # First: install, enable, start ConsoleLogger
+          HELX_LOGGER="$(pwd)/consolelogger.helx"
+          test -f "$HELX_LOGGER"
+          ./helixctl --socket /tmp/helixd.sock install "$HELX_LOGGER" | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock enable ConsoleLogger | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock start ConsoleLogger | grep -E '^OK$'
+          # Verify logger running
+          ./helixctl --no-color --socket /tmp/helixd.sock info ConsoleLogger | grep -E '^state=Running$'
+          # Then: install, enable, start hello example module
           HELX="$(pwd)/hello-module.helx"
           test -f "$HELX"
           ./helixctl --socket /tmp/helixd.sock install "$HELX" | grep -E '^OK$'
@@ -75,10 +86,13 @@ jobs:
           ./helixctl --socket /tmp/helixd.sock start hello-module | grep -E '^OK$'
           # Verify running state without ANSI colors
           ./helixctl --no-color --socket /tmp/helixd.sock info hello-module | grep -E '^state=Running$'
-          # Tear down lifecycle and uninstall
+          # Tear down lifecycle and uninstall (stop hello first, then logger)
           ./helixctl --socket /tmp/helixd.sock stop hello-module | grep -E '^OK$'
           ./helixctl --socket /tmp/helixd.sock disable hello-module | grep -E '^OK$'
           ./helixctl --socket /tmp/helixd.sock uninstall hello-module | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock stop ConsoleLogger | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock disable ConsoleLogger | grep -E '^OK$'
+          ./helixctl --socket /tmp/helixd.sock uninstall ConsoleLogger | grep -E '^OK$'
           # Stop daemon and cleanup
           kill -TERM ${HELIXD_PID}
           wait ${HELIXD_PID} || true
