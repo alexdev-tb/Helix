@@ -17,7 +17,7 @@ each other.
 
 ## Current status
 
-Early alpha, working end-to-end:
+Currently stable, version 1.0.0
 
 - `helixd`: interactive daemon with install/enable/start/stop/disable/uninstall
 - `helxcompiler`: compiles a module source directory into a `.helx` package
