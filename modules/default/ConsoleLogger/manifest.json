@@ -1,6 +1,6 @@
 {
   "name": "ConsoleLogger",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "The default logger for Helix",
   "author": "Helix Framework",
   "license": "MIT",

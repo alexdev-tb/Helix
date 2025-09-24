@@ -2,8 +2,7 @@
 #define HELIX_LOG_H
 
 #include <string>
-#include <vector>
-#include <mutex>
+#include <cstdint>
 
 #ifdef __unix__
 #include <dlfcn.h>
@@ -22,44 +21,37 @@ using HelixLogEmitFn = void (*)(const char*, int, const char*);
 using HelixLogDispatchFn = void (*)(const char*, int, const char*);
 using HelixLogRegisterSinkFn = void (*)(HelixLogEmitFn);
 using HelixLogUnregisterSinkFn = void (*)(HelixLogEmitFn);
+
+// Stats structure shared with the registry. Optional: will be zeroed if not supported.
+struct HelixLogStats {
+    uint64_t dispatched;        // total messages dispatched to sinks (post-filter)
+    uint64_t dropped;           // total dropped for any reason
+    uint64_t dropped_overflow;  // dropped due to bounded pre-sink queue overflow
+    uint64_t dropped_filtered;  // dropped due to level filter
+    uint64_t queued;            // current pre-sink queue size
+    uint64_t queue_capacity;    // configured capacity for pre-sink queue
+    uint64_t sinks;             // number of registered sinks
+    int      min_level;         // current minimum level filter
+};
+
+using HelixLogGetStatsFn = void (*)(HelixLogStats*);
+using HelixLogSetMinLevelFn = void (*)(int);
+using HelixLogGetMinLevelFn = int (*)();
 #endif
 
 // Modules call this helper. It attempts to route to a logging module's
-// helix_log_emit exported symbol. If unavailable, messages are queued in a
-// bounded buffer and dropped on overflow. No printing from core.
+// helix_log_emit exported symbol via a central dispatcher. The central
+// registry manages pre-sink buffering, filtering, and stats. No printing here.
 inline void helix_log(const char* module_name, const char* message, HelixLogLevel level = HELIX_LOG_INFO) {
 #ifdef __unix__
-    struct PendingMsg { std::string mod; int lvl; std::string msg; };
-    static HelixLogDispatchFn dispatch_fn = nullptr; 
-    static std::mutex q_mtx;
-    static std::vector<PendingMsg> queue; 
-    static const size_t MAX = 256;
-
-    auto try_resolve = [&]() {
-        if (!dispatch_fn) {
-            void* sym = dlsym(RTLD_DEFAULT, "helix_log_dispatch");
-            if (sym) dispatch_fn = reinterpret_cast<HelixLogDispatchFn>(sym);
-        }
-        return dispatch_fn != nullptr;
-    };
-
-    if (!dispatch_fn && !try_resolve()) {
-        std::lock_guard<std::mutex> lock(q_mtx);
-        if (queue.size() < MAX) {
-            queue.push_back(PendingMsg{ module_name ? module_name : std::string("(unknown)"), static_cast<int>(level), message ? message : std::string() });
-        }
-        return; 
+    static HelixLogDispatchFn dispatch_fn = nullptr;
+    if (!dispatch_fn) {
+        void* sym = dlsym(RTLD_DEFAULT, "helix_log_dispatch");
+        if (sym) dispatch_fn = reinterpret_cast<HelixLogDispatchFn>(sym);
     }
-
-    // If we reach here, dispatch_fn is available; flush any queued messages first
-    {
-        std::lock_guard<std::mutex> lock(q_mtx);
-        for (const auto& pm : queue) {
-            dispatch_fn(pm.mod.c_str(), pm.lvl, pm.msg.c_str());
-        }
-        queue.clear();
+    if (dispatch_fn) {
+        dispatch_fn(module_name ? module_name : "(unknown)", static_cast<int>(level), message ? message : "");
     }
-    dispatch_fn(module_name ? module_name : "(unknown)", static_cast<int>(level), message ? message : "");
 #else
     (void)module_name; (void)message; (void)level; // non-unix: no-op
 #endif
@@ -84,6 +76,37 @@ inline HelixLogUnregisterSinkFn helix_log_get_unregister() {
 #else
     return nullptr;
 #endif
+}
+
+// Optional: query central logging stats; returns false if unsupported.
+inline bool helix_log_get_stats(struct HelixLogStats* out) {
+#ifdef __unix__
+    if (!out) return false;
+    void* sym = dlsym(RTLD_DEFAULT, "helix_log_stats_get");
+    if (!sym) { *out = HelixLogStats{}; return false; }
+    auto fn = reinterpret_cast<HelixLogGetStatsFn>(sym);
+    fn(out);
+    return true;
+#else
+    (void)out; return false;
+#endif
+}
+
+inline void helix_log_set_min_level(HelixLogLevel level) {
+#ifdef __unix__
+    void* sym = dlsym(RTLD_DEFAULT, "helix_log_min_level_set");
+    if (sym) reinterpret_cast<HelixLogSetMinLevelFn>(sym)(static_cast<int>(level));
+#else
+    (void)level;
+#endif
+}
+
+inline HelixLogLevel helix_log_get_min_level() {
+#ifdef __unix__
+    void* sym = dlsym(RTLD_DEFAULT, "helix_log_min_level_get");
+    if (sym) return static_cast<HelixLogLevel>(reinterpret_cast<HelixLogGetMinLevelFn>(sym)());
+#endif
+    return HELIX_LOG_INFO;
 }
 
 #endif // HELIX_LOG_H
