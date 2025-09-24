@@ -40,8 +40,20 @@ Helix doesn't print module messages from core. Modules call a tiny API and one o
 
   - `helix_log("MyModule", "Initializing...", HELIX_LOG_INFO);`
 
-- The call is a no-op until a Logger module is enabled and started. Messages are queued (up to 256) and flushed once logging is available.
+- The call is a no-op until a Logger module is enabled and started. Messages are queued (bounded; default capacity 256) and flushed once logging is available. Overflow is counted and dropped.
 - Multiple Logger modules can register concurrently; all receive every log message.
+
+Tuning and runtime control:
+
+- Environment variables (read once on first use):
+  - `HELIX_LOG_QUEUE_CAP` — capacity of the pre-sink queue (default: 256)
+  - `HELIX_LOG_MIN_LEVEL` — minimum level to emit: 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR (default: 1)
+- Programmatic controls (from modules):
+  - `helix_log_set_min_level(HELIX_LOG_WARN);`
+  - `auto level = helix_log_get_min_level();`
+- Operational stats for observability:
+  - `helix_log_get_stats(&stats);` fills `HelixLogStats { dispatched, dropped, dropped_overflow, dropped_filtered, queued, queue_capacity, sinks, min_level }`
+  - Use these metrics to monitor for sustained overflow (increase queue or reduce log level) or excessive filtering (lower verbosity).
 
 Quick start with the example logger (ConsoleLogger):
 
@@ -72,7 +84,7 @@ if (auto reg = helix_log_get_register()) reg(&my_sink);
 if (auto unreg = helix_log_get_unregister()) unreg(&my_sink);
 ```
 
-Levels available: `HELIX_LOG_DEBUG`, `HELIX_LOG_INFO`, `HELIX_LOG_WARN`, `HELIX_LOG_ERROR`.
+Levels available: `HELIX_LOG_DEBUG`, `HELIX_LOG_INFO`, `HELIX_LOG_WARN`, `HELIX_LOG_ERROR`. The central dispatcher applies the min-level filter before invoking sinks.
 
 ### Keep lifecycle non-blocking
 

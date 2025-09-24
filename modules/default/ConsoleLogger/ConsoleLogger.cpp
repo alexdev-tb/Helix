@@ -22,7 +22,6 @@
 #include "helix/log.h"
 #include <chrono>
 #include <ctime>
-#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <atomic>

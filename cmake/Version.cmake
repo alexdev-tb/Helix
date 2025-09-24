@@ -18,7 +18,7 @@ function(helix_setup_version)
 
   # Independent API version (semantic): allows compatibility tracking separate from core release
   if(NOT HELIX_API_VERSION)
-    set(HELIX_API_VERSION 1.0.0 CACHE STRING "Helix API version")
+    set(HELIX_API_VERSION 1.1.0 CACHE STRING "Helix API version")
   endif()
 
   # Parse parts
